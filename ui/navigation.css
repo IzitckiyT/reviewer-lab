@@ -38,8 +38,6 @@
 .rail-help-links button span {color:#9dabb9}
 .rail-help-panel>small {display:block;margin-top:19px;color:#a0a7b1;font-size:10px;line-height:1.7}
 .rail-bottom {width:100%;align-items:stretch;gap:12px;margin:12px 0 0;padding-top:14px;border-top:1px solid #e9ebee}
-.app-rail .presentation-button {min-height:35px;padding-top:7px;padding-bottom:7px;color:#9299a3;font-size:11px}
-.presentation-button[aria-pressed=true] {background:#eef2f7!important;color:#405570!important}
 .connection {display:flex;align-items:center;justify-content:flex-start;gap:7px;width:100%;height:auto;min-height:19px;padding:0 12px;color:#98a0aa;font-size:10px;line-height:1.5}
 .connection .status-dot {width:5px;height:5px}
 #connection-label {min-width:0;overflow-wrap:anywhere}
@@ -82,7 +80,6 @@
  .rail-help-panel h2 {font-size:17px}
  .rail-help-panel>p {font-size:11px}
  .rail-bottom {gap:11px;margin-top:9px;padding-top:12px}
- .app-rail .presentation-button {gap:5px;min-height:49px;font-size:9px}
  .connection {justify-content:center;padding:0;min-height:15px}
  #connection-label {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
  .workspace {padding:25px 18px 35px}

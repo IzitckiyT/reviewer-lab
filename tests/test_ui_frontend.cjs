@@ -47,7 +47,7 @@ function harness({respond, allowPost = false} = {}) {
       return {ok: true, json: async () => value};
     },
   });
-  for (const file of ['case-copy.js', 'test-explanation.js', 'provider-setup.js', 'run-story.js', 'task-library.js', 'attack-story.js']) {
+  for (const file of ['case-copy.js', 'test-explanation.js', 'scenario-detail.js', 'provider-setup.js', 'run-story.js', 'task-library.js', 'attack-story.js']) {
     const helper = path.join(__dirname, '..', 'ui', file);
     if (fs.existsSync(helper)) vm.runInContext(fs.readFileSync(helper, 'utf8'), context, {filename: 'ui/' + file});
   }
@@ -125,6 +125,65 @@ function launchFields(h, values = {}) {
   h.node('#launch-form').elements = elements;
   return elements;
 }
+
+test('scenario drilldown uses the exact clicked attempt and no model endpoint', async () => {
+  const chosen = attempt({id:'chosen-row',source:'EXACT_CLICKED_SOURCE'});
+  const h = harness({allowPost:true,respond:async (url, options) => {
+    assert.equal(url,'/api/explain-scenario');
+    assert.equal(options.method,'POST');
+    assert.equal(options.headers['X-Lab-Token'],'test-token');
+    assert.deepEqual(JSON.parse(options.body),{case:'owner',source:chosen.source,index:0});
+    return {case:'owner',index:0,input_values:['editor',true],input:{role:'editor',approved:true},expected:false,actual:true,events:[],truncated:false};
+  }});
+  const data=prepareRun(h,[attempt({id:'other-row',source:'DO_NOT_USE'}),chosen]);
+  h.run("state.data.token='test-token';state.view='runs';state.attempt='other-row'");
+  await h.click({action:'open-scenario',scenarioRun:data.id,scenarioAttempt:chosen.id,scenarioCase:'owner',scenarioIndex:'0'});
+  assert.equal(h.node('#scenario-dialog').open,true);
+  assert.match(h.node('#scenario-body').innerHTML,/Редактор/);
+  assert.match(h.node('#scenario-body').innerHTML,/SAVED_REVIEWER_REASON/);
+  assert.equal(h.run('state.attempt'),'other-row','Opening a scenario must not replace selected attempt or drafts');
+  assert.deepEqual(h.requests,['/api/explain-scenario']);
+});
+
+test('scenario context rejects stale or mismatched rows before any request', async () => {
+  const h=harness();const data=prepareRun(h,[attempt()]);
+  const valid={action:'open-scenario',scenarioRun:data.id,scenarioAttempt:'owner-independent-r1-a1',scenarioCase:'owner',scenarioIndex:'0'};
+  for(const extra of [{scenarioRun:'unknown'},{scenarioAttempt:'wrong'},{scenarioCase:'audit'},{scenarioIndex:'1'},{scenarioIndex:'-1'},{scenarioIndex:'1.1'},{scenarioIndex:''},{scenarioIndex:'NaN'}])await h.click({...valid,...extra});
+  assert.deepEqual(h.requests,[]);
+  assert.notEqual(h.node('#scenario-dialog').open,true);
+});
+
+test('scenario response cannot misrepresent a changed saved outcome', async () => {
+  const h=harness({allowPost:true,respond:async()=>({case:'owner',index:0,input_values:['editor',true],expected:false,actual:false,events:[]})});
+  const data=prepareRun(h,[attempt()]);
+  await h.click({action:'open-scenario',scenarioRun:data.id,scenarioAttempt:'owner-independent-r1-a1',scenarioCase:'owner',scenarioIndex:'0'});
+  assert.match(h.node('#scenario-body').innerHTML,/Сохранённый результат отличается/);
+  assert.doesNotMatch(h.node('#scenario-body').innerHTML,/Ответ кода совпадает/);
+});
+
+test('closing scenario while local replay is pending discards late response', async () => {
+  let resolve;
+  const h=harness({allowPost:true,respond:()=>new Promise(done=>{resolve=done;})});
+  const data=prepareRun(h,[attempt()]);
+  const opening=h.click({action:'open-scenario',scenarioRun:data.id,scenarioAttempt:'owner-independent-r1-a1',scenarioCase:'owner',scenarioIndex:'0'});
+  await Promise.resolve();h.run('closeScenario()');
+  const previous=h.node('#scenario-body').innerHTML;
+  resolve({case:'owner',index:0,input_values:['editor',true],expected:false,actual:true,events:[]});
+  await opening;
+  assert.equal(h.node('#scenario-dialog').open,false);
+  assert.equal(h.node('#scenario-body').innerHTML,previous);
+  assert.equal(h.run('state.scenario'),null);
+});
+
+test('unsaved manual local result supports drilldown without changing editor contents', async () => {
+  const h=harness({allowPost:true,respond:async()=>({case:'owner',index:0,input_values:['editor',true],expected:false,actual:true,events:[]})});
+  const row=attempt({id:'local-preview',mode:'manual'});
+  h.run("state.view='manual';state.manual.preview=row;state.manual.source='EDITED_DRAFT'",{row});
+  await h.click({action:'open-scenario',scenarioRun:'manual-preview',scenarioAttempt:'local-preview',scenarioCase:'owner',scenarioIndex:'0'});
+  assert.equal(h.node('#scenario-dialog').open,true);
+  assert.equal(h.run('state.manual.source'),'EDITED_DRAFT');
+  assert.deepEqual(h.requests,['/api/explain-scenario']);
+});
 
 test('quick start has one launch action and an offline example without disclosing evidence', () => {
   const h = harness();
@@ -492,7 +551,7 @@ test('row drill-in and back use a read-only fixture and preserve list filters', 
   assert.equal(h.run('state.runOpen'), true);
   assert.equal(h.run('location.hash'), '#runs/alpha');
   assert.doesNotMatch(h.run('attemptRecords(state.details.get(state.run))'), /CANDIDATE_ONLY|SAVED_REVIEWER_REASON/);
-  assert.match(h.node('#main').innerHTML, /Как развивалась атака/);
+  assert.match(h.node('#main').innerHTML, /Что делал атакующий/);
   assert.match(h.node('#main').innerHTML, /data-attempt="owner-independent-r1-a1"/);
   assert.match(h.node('#main').innerHTML, /data-action="close-run"/);
   assert.deepEqual(h.requests, ['/api/runs/alpha']);
@@ -1750,7 +1809,8 @@ test('live observation reports measured usage and reaches a finished verdict wit
   completed=true;await h.run('pollOnce()');panel=h.node('#active-slot').innerHTML;
   assert.match(panel,/Эксперимент завершён/);
   assert.match(panel,/Модель пропустила ошибку/);
-  assert.match(panel,/Редактор[^]*По правилу[^]*Публикация запрещена[^]*Код решил[^]*Публикация разрешена/);
+  assert.doesNotMatch(panel,/scenario-witness/,'Completed status stays compact; the attack story holds the counterexample');
+  assert.match(h.node('#attack-story-slot').innerHTML,/Редактор[^]*По правилу[^]*Публикация запрещена[^]*Код решил[^]*Публикация разрешена/);
   assert.doesNotMatch(panel,/True|False|decision\(/);
   assert.match(panel,/1:05/);
   assert.doesNotMatch(panel,/status-dot|data-action="stop"|Проверяем|Ожидание/);
@@ -2099,7 +2159,7 @@ test('an exact example opens its code in a simple screening while normal screeni
   assert.match(h.node('#main').innerHTML,/data-story-attempt="one-screen"[^>]* open/);
   h.run('resetAttemptBrowser();renderRuns()');
   assert.doesNotMatch(h.node('#main').innerHTML,/data-story-attempt="one-screen"[^>]* open/);
-  assert.match(h.node('#main').innerHTML,/Атакующий не участвовал/);
+  assert.match(h.node('#main').innerHTML,/готовый код без атакующего/);
   assert.deepEqual(h.requests,['/api/runs/simple-example']);
 });
 

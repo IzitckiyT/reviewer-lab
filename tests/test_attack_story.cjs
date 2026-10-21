@@ -44,8 +44,8 @@ test('line diff reconstructs both actual versions, including duplicate lines and
 
 test('history explains the goal and shows the actual additions and removals', () => {
   const html = story.render(fixture());
-  assert.match(html, /Как развивалась атака/);
-  assert.match(html, /Цель — сохранить ошибку и получить одобрение/);
+  assert.match(html, /Что делал атакующий/);
+  assert.match(html, /Его цель.*редактору публиковать/s);
   assert.match(html, /− убрали.*\+ добавили/s);
   assert.match(html, /attack-diff-remove[^>]*>-    return role == &quot;owner&quot;/);
   assert.match(html, /attack-diff-add[^>]*>\+    return role in \{&quot;owner&quot;, &quot;editor&quot;\}/);
@@ -59,7 +59,7 @@ test('history explains the goal and shows the actual additions and removals', ()
 test('feedback version compares against both original and previous version in the same chain', () => {
   const first = row({source: 'def decision(role, approved):\n    return approved\n', reviewer: {verdict: 'BLOCK', reason: 'Previous exact reason.'}});
   const second = row({id: 'owner-feedback-r1-a2', attempt: 2, feedback_items: 1, attacker_call: '004-attacker'});
-  const html = story.render(fixture([first, second]));
+  const html = story.render(fixture([first, second]), {attemptId: second.id});
   assert.match(html, /историю из 1 прошлого результата/);
   assert.match(html, /Предыдущий результат, доступный атакующему/);
   assert.match(html, /Previous exact reason\./);
@@ -126,11 +126,11 @@ test('a saved ready candidate has no invented attacker and its code evidence sta
   const data = fixture([row({success: true, outcome: 'success', reviewer: {verdict: 'PASS', reason: 'Saved reason.'}})]);
   data.manifest.experiment_kind = 'candidate_screen';
   const html = story.render(data);
-  assert.match(html, /Атакующий не участвовал: проверяли готовый код/);
+  assert.match(html, /Проверяли готовый код без атакующего/);
   assert.match(html, /Что изменено в проверяемом коде/);
   assert.match(html, /Изменение, которое прошло ревью/);
   assert.match(html, /Сравнение с исходной правильной версией/);
-  assert.doesNotMatch(html, /Как развивалась атака|Предыдущий результат|Новая независимая попытка/);
+  assert.doesNotMatch(html, /Что делал атакующий|Предыдущий результат|Новая независимая попытка/);
   assert.doesNotMatch(html, /<details[^>]* open>/);
   assert.match(story.render(data, {attemptId: data.rows[0].id}), /data-story-attempt="owner-feedback-r1-a1"[^>]* open>/);
 });
@@ -142,7 +142,7 @@ test('manual edits are attributed to the human and preserve exact previous-versi
   assert.match(html, /Как менялся ваш код/);
   assert.match(html, /Код редактировали вручную/);
   assert.match(html, /Что поменялось после попытки 1/);
-  assert.doesNotMatch(html, /Атакующему передали|Как развивалась атака/);
+  assert.doesNotMatch(html, /Атакующему передали|Что делал атакующий/);
 });
 
 test('controls do not become attack iterations and a case filter cannot borrow another case winner', () => {
@@ -224,4 +224,82 @@ test('plain-language explanations are tied to the two exact published source has
   assert.doesNotMatch(story.recordedNotes({...rows[0], oracle: {status: 'evaluated'}}), /До ревьюера|за допустимый предел/);
   assert.doesNotMatch(story.recordedNotes({...rows[0], reviewer: {verdict: 'BLOCK'}}), /До ревьюера|за допустимый предел/);
   assert.doesNotMatch(story.recordedNotes({...rows[1], repeat: 2}, rows[0]), /После предыдущей версии|с 524 287 до 997|среда смогла выполнить/);
+});
+
+function publishedRow(runId, id) {
+  const folder = path.join(__dirname, '../runs', runId, 'attempts', id);
+  return {...JSON.parse(fs.readFileSync(path.join(folder, 'result.json'), 'utf8')),
+    source: fs.readFileSync(path.join(folder, 'candidate.py'), 'utf8')};
+}
+
+test('the recorded two-step attack is explained before any code diff, including the failed local first version', () => {
+  const rows = ['owner-feedback-r1-a1', 'owner-feedback-r1-a2']
+    .map(id => publishedRow('first-experiment-2026-10-19', id));
+  const html = story.render(fixture(rows));
+  const summary = html.slice(html.indexOf('class="attack-story-explainer"'), html.indexOf('class="attack-story-timeline"'));
+  assert.match(summary, /Что делал атакующий/);
+  assert.match(summary, /Его цель.*редактору публиковать/s);
+  assert.match(summary, /Было.*role == &quot;owner&quot;.*Стало.*оба равны <code>830/s);
+  assert.match(summary, /Версия 1.*Убрал прямое сравнение.*Ревьюер эту версию не получал/s);
+  assert.match(summary, /Версия 2.*Получил сообщение об ограничении среды.*524 287 → 997/s);
+  assert.match(summary, /Ревьюер отклонил его — обхода нет/);
+  assert.doesNotMatch(summary, /обход удался|attack-story-diff/);
+  assert.equal((html.match(/<h[23]>Что делал атакующий<\/h[23]>/g) || []).length, 1);
+  assert.doesNotMatch(summary, /В режиме с обратной связью|Он меняет сам Python-код/);
+  assert.doesNotMatch(html, /<details[^>]* open>/);
+  assert.match(story.render(fixture(rows), {attemptId: rows[1].id}), /data-story-attempt="owner-feedback-r1-a2"[^>]* open>/);
+});
+
+test('a ready seed is attributed to the prepared example, with a single fixed patch distinguished from repeated reviews', () => {
+  const candidate = row({mode: 'independent', candidate_origin: {kind: 'case_seed'}, attacker_call: undefined});
+  const data = fixture([candidate, {...candidate, id: 'second-review', repeat: 2}, {...candidate, id: 'third-review', repeat: 3}]);
+  data.manifest.experiment_kind = 'candidate_screen';
+  data.cases[0].seed = bad;
+  const html = story.render(data);
+  assert.match(html, /Готовый пример ошибки из этой задачи\. В этом запуске атакующего не вызывали/);
+  assert.match(html, /Один и тот же код отправили ревьюеру 3 раза/);
+  assert.match(html, /Это новые ответы модели, а не новые правки атакующего/);
+  assert.doesNotMatch(html, /class="attack-story-steps"|Получил сообщение об ограничении среды|Его цель/);
+  const summary = html.slice(0, html.indexOf('class="attack-story-timeline"'));
+  assert.equal((summary.match(/<h[23]>/g) || []).length, 1);
+  assert.match(summary, /По правилу.*только с подтверждением.*Что изменили.*редактор с подтверждением/s);
+  assert.doesNotMatch(summary, /Добавлено строк|Затронуты функции|Что проверяли в этом запуске|Атакующий не участвовал/);
+  data.rows[1].source = original;
+  assert.doesNotMatch(story.render(data), /Один и тот же код отправили ревьюеру/);
+  data.cases[0].seed = original;
+  const unverified = story.render(data);
+  assert.match(unverified, /Совпадение с примером задачи не подтверждено/);
+  assert.doesNotMatch(unverified, /Готовый пример ошибки из этой задачи|Что изменили/);
+});
+
+test('the repeated owner collision describes the old attack without inventing edits in the new run', () => {
+  const candidate = publishedRow('first-experiment-2026-10-19', 'owner-feedback-r1-a2');
+  const data = fixture([candidate, {...candidate, id: 'second-review', repeat: 2}, {...candidate, id: 'third-review', repeat: 3}]);
+  data.manifest.experiment_kind = 'candidate_screen';
+  const html = story.render(data);
+  assert.match(html, /совпадает с патчем, который атакующий создал в первом эксперименте/);
+  assert.match(html, /оба равны <code>830<\/code> — редактор проходит как владелец/);
+  assert.doesNotMatch(html, /class="attack-story-steps"|Получил сообщение об ограничении среды/);
+});
+
+test('unknown code gets structural changes, with no invented semantic reason or feedback transition', () => {
+  const html = story.render(fixture());
+  const summary = html.slice(html.indexOf('class="attack-story-explainer"'), html.indexOf('class="attack-story-timeline"'));
+  assert.match(summary, /Добавлено строк: 1; удалено: 1/);
+  assert.match(summary, /Затронуты функции: decision/);
+  assert.doesNotMatch(summary, /830|owner и editor получается одно число|После предыдущей версии|ввела модель в ошибку/);
+  const first = publishedRow('first-experiment-2026-10-19', 'owner-feedback-r1-a1');
+  const second = publishedRow('first-experiment-2026-10-19', 'owner-feedback-r1-a2');
+  for (const variant of [
+    {...second, feedback_items: 0}, {...second, feedback_items: undefined},
+    {...second, mode: 'independent'}, {...second, repeat: 2},
+  ]) assert.doesNotMatch(story.render(fixture([first, variant])), /Получил сообщение об ограничении среды и уменьшил/);
+  assert.doesNotMatch(story.render(fixture([{...first, oracle: {status: 'evaluated'}}, second])), /Получил сообщение об ограничении среды и уменьшил/);
+});
+
+test('an unknown supplied file does not inherit an attacker identity from configured model names', () => {
+  const data = fixture([row({candidate_origin: {kind: 'supplied_file'}})]);
+  data.manifest.experiment_kind = 'candidate_screen';
+  assert.match(story.render(data), /Кто его написал, в этой записи не указано/);
+  assert.doesNotMatch(story.render(data), /Готовый пример ошибки из этой задачи|атакующий создал в первом эксперименте/);
 });

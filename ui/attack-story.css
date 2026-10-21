@@ -6,6 +6,21 @@
 .attack-story h2 {margin:0 0 9px;font:500 22px/1.35 var(--sans);letter-spacing:-.35px}
 .attack-story-heading p {margin:0;color:var(--muted);font-size:13px;line-height:1.85}
 .attack-story-count {flex:none;padding-top:29px;color:var(--muted);font-size:11px;white-space:nowrap}
+.attack-story-explainer {margin:0 0 21px;padding:19px 21px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.attack-story-explainer>h2 {margin-bottom:12px}
+.attack-story-explainer .attack-story-process {max-width:760px;margin:9px 0;color:#66758a;font-size:12px;line-height:1.85}
+.attack-story-goal {max-width:760px;margin:0 0 12px;font-size:13px;line-height:1.8}
+.attack-story-goal>span {display:block;margin-bottom:2px;color:var(--muted);font-size:10px}
+.attack-story-before-after {display:grid;grid-template-columns:1fr 1fr;gap:19px;margin:15px 0;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.attack-story-before-after p {margin:0;color:#52637a;font-size:12px;line-height:1.85}
+.attack-story-before-after p>span {display:block;margin-bottom:3px;color:#8b95a4;font-size:10px}
+.attack-story-before-after code {font:11px/1.7 var(--mono);overflow-wrap:anywhere}
+.attack-story-steps {display:grid;gap:15px;max-width:780px;margin:17px 0 4px;padding-left:20px}
+.attack-story-steps>li {padding-left:5px;color:#8b95a4;font-size:11px}
+.attack-story-steps strong {color:var(--ink);font-size:12px;font-weight:500}
+.attack-story-steps p {margin:4px 0 0;color:#66758a;font-size:12px;line-height:1.85}
+.attack-story-explainer .attack-story-step-result {margin:6px 0 0;color:#52637a;font-size:12px;line-height:1.85}
+.attack-story-explainer>.attack-story-note {margin:13px 0 0}
 .attack-story-timeline {overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:8px}
 .attack-story-iteration {border-bottom:1px solid var(--line)}
 .attack-story-iteration:last-child {border-bottom:0}
@@ -68,6 +83,8 @@
 .attack-story-brief p {max-width:680px;margin:0;color:var(--muted);font-size:12px}
 .attack-story-brief>.attack-story-timeline {margin-top:15px}
 @media(max-width:760px) {
+ .attack-story-explainer {padding:17px}
+ .attack-story-before-after {grid-template-columns:1fr;gap:12px}
  .attack-story-heading {display:block}
  .attack-story-count {display:block;padding-top:10px}
  .attack-story-iteration>summary {grid-template-columns:19px minmax(0,1fr) 13px;gap:10px;padding:16px 15px}

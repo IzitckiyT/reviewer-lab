@@ -13,8 +13,10 @@
   <link rel="stylesheet" href="/attack-story.css">
   <link rel="stylesheet" href="/task-library.css">
   <link rel="stylesheet" href="/navigation.css">
+  <link rel="stylesheet" href="/scenario-detail.css">
   <script src="/case-copy.js" defer></script>
   <script src="/test-explanation.js" defer></script>
+  <script src="/scenario-detail.js" defer></script>
   <script src="/provider-setup.js" defer></script>
   <script src="/run-story.js" defer></script>
   <script src="/attack-story.js" defer></script>
@@ -46,7 +48,6 @@
       </div>
     </details>
     <div class="rail-bottom">
-      <button class="nav-button presentation-button" type="button" id="present-button" aria-label="Режим лекции" aria-pressed="false" title="Режим лекции"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H4V4Zm8 12v5m-4 0h8M2 4h20"/></svg><span class="nav-label"><span class="nav-label-full">Презентация</span><span class="nav-label-short" aria-hidden="true">Показ</span></span></button>
       <div class="connection" title="Состояние локального сервера"><span class="status-dot" id="connection-dot" aria-hidden="true"></span><span id="connection-label" aria-live="polite">Подключаемся…</span></div>
     </div>
   </aside>
@@ -57,5 +58,6 @@
   <div id="toast" role="status" aria-live="polite"></div>
   <dialog id="case-dialog" aria-labelledby="case-dialog-title" aria-describedby="case-dialog-description"><div class="case-dialog-top"><div><h2 id="case-dialog-title">Что проверяем?</h2><p id="case-dialog-description">Выберите задачу для ревьюера.</p></div><button class="icon-button" type="button" data-action="close-case-picker" aria-label="Закрыть выбор задачи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div id="case-options"></div><p class="case-dialog-note">Выбор задачи ничего не запускает. Все примеры выполняются в ограниченной локальной среде.</p></dialog>
   <dialog id="trace-dialog" aria-labelledby="trace-title" aria-describedby="trace-description"><div class="dialog-top"><div class="dialog-heading"><h2 id="trace-title"></h2><p class="dialog-subtitle" id="trace-description">Запрос, ответ и события</p></div><button class="icon-button" type="button" id="close-trace" aria-label="Закрыть трассу"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div id="trace-body"></div></dialog>
+  <dialog id="scenario-dialog" aria-labelledby="scenario-title" aria-describedby="scenario-description"><div class="dialog-top"><div class="dialog-heading"><h2 id="scenario-title">Разбор ситуации</h2><p class="dialog-subtitle" id="scenario-description">Что получил код и почему так решил</p></div><button class="icon-button" type="button" id="close-scenario" aria-label="Закрыть разбор ситуации" autofocus><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div id="scenario-body" aria-live="polite"></div></dialog>
 </body>
 </html>

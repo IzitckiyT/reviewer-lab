@@ -11,6 +11,8 @@ MAX_NODES = 600
 MAX_STEPS = 6000
 MAX_DEPTH = 32
 MAX_VALUE = 1_000_000
+MAX_TRACE_EVENTS = 256
+MAX_TRACE_TEXT = 360
 
 LANGUAGE = """Return an entire Python module, not a diff or Markdown. Define decision with
 exactly the original positional parameter names. At most 8 top-level functions;
@@ -195,6 +197,9 @@ class Program:
         for name in graph:
             visit(name, set())
         self.steps = 0
+        self.trace_events = None
+        self.trace_truncated = False
+        self.trace_stack = []
 
     def invalid(self, reason, node=None, *, message=None, kind="invalid"):
         line = getattr(node, "lineno", None)
@@ -211,9 +216,45 @@ class Program:
         if self.steps > MAX_STEPS or depth > MAX_DEPTH:
             raise InvalidCandidate("Execution budget exceeded")
 
-    def run(self, args):
+    def expression(self, node):
+        """Source text only: candidate expressions are never evaluated by Python."""
+        if isinstance(node, ast.FunctionDef):
+            # Entering a function does not execute all the branches in its body.
+            text = node.name + "(" + ", ".join(arg.arg for arg in node.args.args) + ")"
+        else:
+            text = ast.get_source_segment(self.source, node) or ""
+        return text if len(text) <= MAX_TRACE_TEXT else text[:MAX_TRACE_TEXT - 1] + "…"
+
+    def record(self, node, kind, value, **details):
+        if self.trace_events is None:
+            return
+        if len(self.trace_events) >= MAX_TRACE_EVENTS:
+            self.trace_truncated = True
+            return
+        line = getattr(node, "lineno", None)
+        offset = getattr(node, "col_offset", None)
+        column = None
+        if line is not None and offset is not None:
+            prefix = self.source.splitlines()[line - 1].encode("utf-8")[:offset]
+            column = len(prefix.decode("utf-8")) + 1
+        expression = details.pop("expression", None)
+        if expression is None:
+            expression = self.expression(node)
+        elif len(expression) > MAX_TRACE_TEXT:
+            expression = expression[:MAX_TRACE_TEXT - 1] + "…"
+        event = {"line": line, "column": column,
+                 "function": self.trace_stack[-1] if self.trace_stack else "decision",
+                 "kind": kind, "expression": expression,
+                 "value": trace_value(value), "value_repr": trace_repr(value)}
+        event.update({key: trace_value(item) for key, item in details.items()})
+        self.trace_events.append(event)
+
+    def run(self, args, *, trace=False):
         self.steps = 0
         self.decision_return = None
+        self.trace_events = [] if trace else None
+        self.trace_truncated = False
+        self.trace_stack = []
         try:
             value = self.call("decision", list(args), 0)
             if type(value) is not bool:
@@ -235,23 +276,36 @@ class Program:
         if len(args) != len(fn.args.args):
             raise InvalidCandidate("Wrong helper argument count")
         env = dict(zip((a.arg for a in fn.args.args), args))
+        tracing = self.trace_events is not None
+        if tracing:
+            self.trace_stack.append(name)
+            self.record(fn, "enter", None, arguments=env)
         try:
             self.block(fn.body, env, depth + 1)
         except Returned as ret:
             if name == "decision":
                 self.decision_return = ret.node
             return checked(ret.value)
+        finally:
+            if tracing:
+                self.trace_stack.pop()
         return None
 
     def block(self, nodes, env, depth):
         for node in nodes:
             self.tick(depth)
             if isinstance(node, ast.Return):
-                raise Returned(self.expr(node.value, env, depth + 1) if node.value else None, node)
+                value = self.expr(node.value, env, depth + 1) if node.value else None
+                self.record(node, "return", value)
+                raise Returned(value, node)
             if isinstance(node, ast.Assign):
                 env[node.targets[0].id] = self.expr(node.value, env, depth + 1)
+                self.record(node, "assignment", env[node.targets[0].id], target=node.targets[0].id)
             elif isinstance(node, ast.If):
-                branch = node.body if self.expr(node.test, env, depth + 1) else node.orelse
+                condition = self.expr(node.test, env, depth + 1)
+                self.record(node.test, "branch", bool(condition),
+                            branch="then" if condition else "else")
+                branch = node.body if condition else node.orelse
                 self.block(branch, env, depth + 1)
             elif not isinstance(node, (ast.Expr, ast.Pass)):
                 raise InvalidCandidate("Unsupported statement")
@@ -277,12 +331,17 @@ class Program:
             value = ev(node.value)[ev(node.slice)]
         elif isinstance(node, ast.BoolOp):
             value = ev(node.values[0])
+            evaluated = 1
             for child in node.values[1:]:
                 if isinstance(node.op, ast.And) and not value:
                     break
                 if isinstance(node.op, ast.Or) and value:
                     break
                 value = ev(child)
+                evaluated += 1
+            self.record(node, "boolean", value,
+                        operator="and" if isinstance(node.op, ast.And) else "or",
+                        evaluated=evaluated, skipped=len(node.values) - evaluated)
         elif isinstance(node, ast.UnaryOp):
             arg = ev(node.operand)
             if isinstance(node.op, ast.Not):
@@ -292,13 +351,16 @@ class Program:
                     raise InvalidCandidate("Unary arithmetic requires integers")
                 value = {ast.UAdd: operator.pos, ast.USub: operator.neg,
                          ast.Invert: operator.invert}[type(node.op)](arg)
+            self.record(node, "unary", value, operand=arg)
         elif isinstance(node, ast.BinOp):
             left, right = ev(node.left), ev(node.right)
             if type(left) not in (bool, int) or type(right) not in (bool, int):
                 raise InvalidCandidate("Binary arithmetic requires integers")
             value = BINARY[type(node.op)](left, right)
+            self.record(node, "arithmetic", value, left=left, right=right)
         elif isinstance(node, ast.Compare):
             left = ev(node.left)
+            left_node = node.left
             value = True
             for op, right_node in zip(node.ops, node.comparators):
                 right = ev(right_node)
@@ -306,14 +368,69 @@ class Program:
                     operand is not None and type(operand) is not bool for operand in (left, right)
                 ):
                     raise InvalidCandidate("Identity comparison is only defined for bool/None in this subset")
-                if not COMPARE[type(op)](left, right):
+                comparison = COMPARE[type(op)](left, right)
+                symbol = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<",
+                          ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=",
+                          ast.Is: "is", ast.IsNot: "is not", ast.In: "in",
+                          ast.NotIn: "not in"}[type(op)]
+                # A true first pair does not mean the whole chained comparison
+                # succeeded. Show the exact pair whose value was just computed.
+                expression = (f"({self.expression(left_node)}) {symbol} "
+                              f"({self.expression(right_node)})"
+                              if self.trace_events is not None and len(node.ops) > 1 else None)
+                self.record(node, "compare", comparison, left=left, right=right,
+                            operator=symbol, expression=expression)
+                if not comparison:
                     value = False
                     break
                 left = right
+                left_node = right_node
         elif isinstance(node, ast.IfExp):
-            value = ev(node.body if ev(node.test) else node.orelse)
+            condition = ev(node.test)
+            self.record(node.test, "branch", bool(condition),
+                        branch="then" if condition else "else")
+            value = ev(node.body if condition else node.orelse)
         elif isinstance(node, ast.Call):
-            value = self.call(node.func.id, [ev(arg) for arg in node.args], depth + 1)
+            args = [ev(arg) for arg in node.args]
+            value = self.call(node.func.id, args, depth + 1)
+            self.record(node, "call", value, name=node.func.id, arguments=args)
         else:
             raise InvalidCandidate(f"Unsupported expression: {type(node).__name__}")
         return checked(value)
+
+
+def trace_repr(value):
+    """Readable snapshots of the interpreter's data, never candidate objects."""
+    # Values have already passed checked(); repr cannot invoke candidate methods.
+    text = repr(value)
+    return text if len(text) <= MAX_TRACE_TEXT else text[:MAX_TRACE_TEXT - 1] + "…"
+
+
+def trace_value(value, depth=0, budget=None):
+    """Bound JSON output separately from the interpreter's execution budgets."""
+    if budget is None:
+        budget = [64]
+    budget[0] -= 1
+    if budget[0] < 0 or depth > 4:
+        return "…"
+    if value is None or type(value) in (bool, int, str):
+        return value
+    if type(value) in (tuple, list, set):
+        items = list(value)
+        if type(value) is set:
+            items.sort(key=lambda item: (type(item).__name__, repr(item)))
+        result = [trace_value(item, depth + 1, budget) for item in items[:16]]
+        if len(items) > 16:
+            result.append("…")
+        return result
+    if type(value) is dict:
+        items = list(value.items())
+        if all(type(key) is str for key, _ in items):
+            result = {key: trace_value(item, depth + 1, budget) for key, item in items[:16]}
+            if len(items) > 16:
+                result["…"] = f"{len(items) - 16} more"
+            return result
+        return [{"key": trace_value(key, depth + 1, budget),
+                 "value": trace_value(item, depth + 1, budget)} for key, item in items[:16]]
+    # Only trusted trace metadata and bounded candidate values reach this helper.
+    return trace_repr(value)

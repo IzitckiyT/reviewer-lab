@@ -64,9 +64,6 @@ main {min-width:0;margin:0;padding:0}
 .loading {padding:90px 20px;color:#939daa;text-align:center;font-size:14px}
 #toast {display:none;position:fixed;z-index:100;bottom:24px;left:50%;transform:translateX(-50%);max-width:90vw;padding:12px 18px;border-radius:7px;background:#3b4657;color:#fff;font-size:13px}
 #toast.visible {display:block}
-.lecture .workspace {padding-top:30px}
-.lecture .guide {max-width:1150px}
-.lecture .guide-heading h1 {font-size:30px}
 @media(max-width:1000px) {.workspace {padding-left:25px;padding-right:25px}.page-head {gap:18px}.workspace-tabs {gap:24px}}
 @media(max-width:680px) {
  .app-rail {width:54px;padding:17px 6px 12px}.rail-brand {width:38px;height:35px;margin-bottom:23px}.nav-button {width:38px;height:39px}.rail-nav {gap:10px}

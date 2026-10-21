@@ -490,6 +490,44 @@ class HTTPTests(unittest.TestCase):
             with self.subTest(headers=bad):
                 self.assertEqual(self.request('/api/manual/check', payload, bad)[0], 403)
 
+    def test_scenario_trace_runs_exact_canonical_input_offline_in_demo(self):
+        self.restart(read_only=True)
+        case = CASES['mb_malware_chain']
+        index = case.inputs().index(('52.84.125.33', 'cdn_health.txt', 'execute'))
+        payload = dict(case=case.id, source=case.seed, index=index)
+        headers = {'X-Lab-Token': self.server.dashboard.token}
+        before = {str(p): p.read_bytes() for p in Path(self.temp.name).rglob('*') if p.is_file()}
+        with patch('lab.ui.create_transport') as transport, patch('lab.ui.subprocess.Popen') as popen:
+            code, _, body = self.request('/api/explain-scenario', payload, headers)
+            self.assertEqual(code, 200, body)
+            trace = json.loads(body)
+            self.assertEqual(trace['input_values'], list(case.inputs()[index]))
+            self.assertIs(trace['expected'], False)
+            self.assertIs(trace['actual'], True)
+            self.assertTrue(any(event['kind'] == 'return' and event['value'] is True for event in trace['events']))
+            self.assertEqual(trace['source_sha256'], digest(case.seed))
+            transport.assert_not_called()
+            popen.assert_not_called()
+        after = {str(p): p.read_bytes() for p in Path(self.temp.name).rglob('*') if p.is_file()}
+        self.assertEqual(before, after)
+        self.assertEqual(self.request('/api/explain-scenario', payload)[0], 403)
+        self.assertEqual(self.request('/api/explain-scenario', payload,
+            dict(headers, Origin='https://elsewhere.example'))[0], 403)
+
+    def test_scenario_trace_rejects_wrong_inputs_extra_fields_and_unsafe_code(self):
+        payload = dict(case='owner', source=CASES['owner'].seed, index=3)
+        headers = {'X-Lab-Token': self.server.dashboard.token}
+        invalid = [[], {}, dict(payload, case='missing'), dict(payload, case=[]),
+                   dict(payload, index=True), dict(payload, index=-1), dict(payload, index=14),
+                   dict(payload, index=1.0), dict(payload, index='3'), dict(payload, input=['owner', True]),
+                   dict(payload, source=None), dict(payload, source='import os\n'),
+                   dict(payload, source='x' * 8193)]
+        with patch('lab.ui.create_transport') as transport:
+            for config in invalid:
+                with self.subTest(config=config):
+                    self.assertEqual(self.request('/api/explain-scenario', config, headers)[0], 400)
+            transport.assert_not_called()
+
     def test_duplicate_host_headers_are_rejected(self):
         client = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
         client.putrequest('GET', '/api/state', skip_host=True)
@@ -581,13 +619,16 @@ class HTTPTests(unittest.TestCase):
         self.assertLess(body.index(b'src="/test-explanation.js"'), body.index(b'src="/app.js"'))
         self.assertLess(body.index(b'src="/case-copy.js"'), body.index(b'src="/task-library.js"'))
         self.assertLess(body.index(b'src="/task-library.js"'), body.index(b'src="/app.js"'))
-        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView'), ('task-library.js', b'LabTaskLibrary')]:
+        self.assertLess(body.index(b'src="/scenario-detail.js"'), body.index(b'src="/app.js"'))
+        self.assertNotIn(b'present-button', body)
+        self.assertIn(b'id="scenario-dialog"', body)
+        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView'), ('task-library.js', b'LabTaskLibrary'), ('scenario-detail.js', b'LabScenarioDetail')]:
             code, headers, body = self.request('/' + name)
             self.assertEqual(code, 200)
             self.assertEqual(headers['Content-Type'], 'text/javascript; charset=utf-8')
             self.assertIn(marker, body)
         self.assertEqual(self.request('/../case-copy.js')[0], 404)
-        for name in ('task-library.css', 'navigation.css'):
+        for name in ('task-library.css', 'navigation.css', 'scenario-detail.css'):
             code, headers, _ = self.request('/' + name)
             self.assertEqual(code, 200)
             self.assertEqual(headers['Content-Type'], 'text/css; charset=utf-8')

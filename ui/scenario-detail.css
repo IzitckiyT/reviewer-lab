@@ -1,0 +1,81 @@
+/* One situation, with the actual local execution a deliberate click away. */
+#scenario-dialog {width:min(780px,96vw);max-width:96vw}
+#scenario-dialog .dialog-top {padding:22px 28px}
+#scenario-description {max-width:560px;line-height:1.7}
+#scenario-body {padding:28px;overflow-wrap:anywhere}
+.scenario-detail {min-width:0;color:#344055}
+.scenario-detail-kicker {display:block;margin-bottom:10px;color:#929ba8;font-size:11px;line-height:1.6}
+.scenario-detail-intro h3 {color:#344055;font:500 23px/1.35 var(--sans);letter-spacing:-.025em}
+.scenario-detail-intro h3.is-mismatch {color:#a35c64}
+.scenario-detail-intro p {margin-top:14px;color:#647287;font-size:14px;line-height:1.8}
+.scenario-decisions {display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:24px;padding:20px 0;border-top:1px solid #e6eaf0;border-bottom:1px solid #e6eaf0}
+.scenario-decisions span {display:block;color:#939ca9;font-size:11px;line-height:1.6}
+.scenario-decisions strong {display:block;margin-top:6px;color:#496178;font:500 15px/1.6 var(--sans)}
+.scenario-decisions .is-mismatch strong {color:#a35c64}
+.scenario-rule {margin-top:14px;color:#7d8999;font-size:12px;line-height:1.8}
+.scenario-execution {margin-top:28px}
+.scenario-execution>h3,.scenario-reviewer>h3 {font:500 15px/1.6 var(--sans);color:#3d4e64}
+.scenario-detail-note {margin-top:7px;color:#8a94a3;font-size:11px;line-height:1.8}
+.scenario-detail-note code {font-size:10px}
+.scenario-steps {list-style:none;display:grid;gap:17px;margin:18px 0 24px;padding:0;counter-reset:scenario-step}
+.scenario-step {min-width:0;padding:17px 18px;border:1px solid #e5eaf0;border-radius:6px;background:#fafbfd}
+.scenario-step-heading {display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:10px}
+.scenario-step-heading>span {order:2;flex-shrink:0;color:#a0a8b4;font:10px/1.6 var(--mono)}
+.scenario-step-heading>strong {color:#5d6c80;font:500 12px/1.6 var(--sans)}
+.scenario-step>pre {overflow:auto;margin:0;padding:0 0 5px;background:transparent;color:#60718a;font:11px/1.8 var(--mono);white-space:pre}
+.scenario-step-result {margin-top:8px;color:#53677f;font-size:12px;line-height:1.8}
+.scenario-step-note {margin-top:7px;color:#8a95a5;font-size:11px;line-height:1.8}
+.scenario-condition-list {display:grid;gap:6px;margin:9px 0 11px;padding:0;list-style:none}
+.scenario-condition-list>li {display:flex;justify-content:space-between;align-items:baseline;gap:14px;min-width:0}
+.scenario-condition-list code {color:#8190a3;font-size:10px;line-height:1.8;overflow-wrap:anywhere}
+.scenario-condition-list span {flex-shrink:0;color:#8e99a8;font-size:10px;line-height:1.8}
+.scenario-condition-list .is-true {color:#628777}
+.scenario-disclosure {padding:16px 0;border-top:1px solid #e7eaf0}
+.scenario-disclosure>summary {display:flex;justify-content:space-between;align-items:baseline;gap:18px;color:#7c8a9e;font-size:12px;line-height:1.8;cursor:pointer;list-style:none}
+.scenario-disclosure>summary::-webkit-details-marker {display:none}
+.scenario-disclosure>summary::after {content:'+';color:#96a0ad;font-size:15px;line-height:1.5}
+.scenario-disclosure[open]>summary::after {content:'−'}
+.scenario-disclosure>summary:hover {color:#1769db}
+.scenario-disclosure>summary:focus-visible {outline:2px solid #1769db;outline-offset:4px;border-radius:2px}
+.scenario-source {max-height:440px;overflow:auto;margin:14px 0 0;padding:13px 0;border-radius:4px;background:#f6f7f9;color:#697b93;font:11px/1.85 var(--mono)}
+.scenario-source-line {display:flex;min-width:max-content;padding-right:15px}
+.scenario-source-line.is-executed {background:#eaf2fc;color:#3f6896;box-shadow:inset 2px 0 #739ac8}
+.scenario-line-number {width:43px;flex-shrink:0;padding-right:13px;text-align:right;color:#a9b2bf;user-select:none}
+.scenario-input {display:grid;gap:13px;margin:18px 0 24px;padding:0}
+.scenario-input>div {display:grid;grid-template-columns:minmax(120px,.8fr) minmax(0,1.4fr);gap:20px}
+.scenario-input dt {color:#8996a6;font-size:11px;line-height:1.7}
+.scenario-input dt small,.scenario-input dd code {display:block;margin-top:3px;color:#a2adba;font:10px/1.7 var(--mono)}
+.scenario-input dd {margin:0;color:#64778e;font-size:12px;line-height:1.7}
+.scenario-full-trace {display:grid;gap:14px;margin:18px 0 0;padding-left:21px;color:#9ba7b5}
+.scenario-event {padding-left:4px;min-width:0;font-size:11px;line-height:1.7}
+.scenario-event>span {display:block;color:#687b92}
+.scenario-event>code {display:block;overflow-wrap:anywhere;color:#96a2b2;font:10px/1.8 var(--mono)}
+.scenario-event>small {display:block;margin-top:2px;color:#a6afbc;font-size:10px}
+.scenario-reviewer {margin-top:10px;padding-top:22px;border-top:1px solid #e6eaf0}
+.scenario-reviewer>p {margin-top:9px;color:#8995a5;font-size:12px;line-height:1.8}
+.scenario-reviewer .scenario-disclosure {margin-top:12px;padding-bottom:0;border-top:0}
+.scenario-reviewer blockquote {margin:14px 0 0;padding-left:14px;border-left:2px solid #dfe5ed;color:#718399;font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
+.scenario-detail-scope {margin-top:25px;color:#9aa4b2;font-size:11px;line-height:1.9}
+.scenario-pending h3,.scenario-error h3 {font:500 17px/1.5 var(--sans)}
+.scenario-pending>p,.scenario-error>p {margin-top:10px;color:#8390a2;font-size:13px;line-height:1.8}
+.scenario-error h3 {color:#a4666c}
+.scenario-table .scenario-open {display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;padding:0;border:0;background:transparent;color:inherit;text-align:left;font:inherit;line-height:inherit}
+.scenario-table .scenario-open>span:first-child {min-width:0}
+.scenario-table .scenario-open-arrow {flex-shrink:0;color:#b1bac7;opacity:.6;font-size:15px}
+.scenario-table .scenario-row:hover {background:#f4f7fc}
+.scenario-table .scenario-row:hover .scenario-open,.scenario-table .scenario-open:hover {color:#416d9f}
+.scenario-table .scenario-row:hover .scenario-open-arrow {opacity:1;color:#6089b8}
+.scenario-table .scenario-open:focus-visible {outline:2px solid #1769db;outline-offset:6px;border-radius:2px}
+@media(max-width:640px) {
+ #scenario-dialog .dialog-top {padding:19px 20px}
+ #scenario-body {padding:22px 20px}
+ .scenario-detail-intro h3 {font-size:21px}
+ .scenario-detail-intro p {font-size:13px}
+ .scenario-decisions {gap:18px}
+ .scenario-decisions strong {font-size:13px}
+ .scenario-step {padding:15px 13px}
+ .scenario-step-heading {gap:12px}
+ .scenario-step-heading>strong {font-size:11px}
+ .scenario-input>div {grid-template-columns:1fr;gap:5px}
+ .scenario-condition-list>li {flex-wrap:wrap;gap:0 12px}
+}

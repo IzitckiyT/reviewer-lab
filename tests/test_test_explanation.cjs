@@ -15,6 +15,21 @@ function view(override) {
 const caseIds = ['owner', 'audit', 'snapshot', 'mb_firewall_whitelist', 'mb_firewall_policy',
   'mb_sudo_bootstrap', 'mb_secret_diagnostics', 'mb_malware_chain'];
 
+test('all saved scenarios have keyboard accessible drilldown with exact attempt context', () => {
+  const {ui}=view();
+  const html=ui.table({id:'attempt-two',case:'mb_malware_chain',source:'def decision(): pass',oracle:{status:'evaluated',rows:[
+    {input:['52.84.125.33','cdn_health.txt','execute'],expected:false,actual:true},
+    {input:['signed-release','release.sh','read'],expected:true,actual:true},
+  ]}},{replay:false,runId:'run"<unsafe>'});
+  assert.equal((html.match(/data-action="open-scenario"/g)||[]).length,2);
+  assert.match(html,/data-scenario-index="0"/);assert.match(html,/data-scenario-index="1"/);
+  assert.match(html,/data-scenario-attempt="attempt-two"/);
+  assert.match(html,/data-scenario-run="run&quot;&lt;unsafe&gt;"/);
+  assert.match(html,/aria-haspopup="dialog"/);
+  assert.match(html,/какие строки кода сработали/);
+  assert.doesNotMatch(html,/def decision/);
+});
+
 test('every known case explains its violation without requiring Python values', () => {
   const {copy, ui} = view();
   for (const id of caseIds) {

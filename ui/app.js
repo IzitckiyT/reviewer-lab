@@ -8,7 +8,7 @@ const state = {data:null, view:'runs', run:null, runOpen:false, attempt:null, de
   demoAttempt:null, stage:0, demoMode:'welcome', playing:false, timer:null, tab:'snippet', inspectorTab:'source', trace:null, runQuery:'', runFilter:'all', runCase:'all', runStatus:'all', runEffort:'all', filtersExpanded:false, attemptOpen:false, attemptQuery:'', attemptFilter:'all', attemptSort:'original', launchPending:false,
   providerId:null,reviewerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,casePickerTask:null,exampleAttempt:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
 const replicationIds = ['replication-collision-low-2026-10-19','replication-collision-medium-2026-10-19'];
-let toastTimer;
+let toastTimer, scenarioRequest = 0;
 function toast(message) { $('#toast').textContent=message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),4500); }
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-Lab-Token':state.data.token},body:JSON.stringify(body)});
@@ -261,8 +261,8 @@ function demoRail(d,row) {
   const steps=[['Правило',row.case==='owner'?'Доступ только владельцу':caseRule(row.case),'00'],['Кандидат','Изменение исходного кода','01'],['Поведение кода','Решения по правилу','02'],['Решение ревьюера','Оценка кода моделью','03'],['Повторения','Новые сессии, тот же патч','04']];
   return `<aside class="trace-rail" aria-label="Шаги демонстрации"><div class="rail-title">Ход эксперимента <span>5 шагов</span></div>${steps.map(([name,meta,n],i)=>`<button class="trace-step ${state.stage===i?'active':''}" data-stage="${i}" aria-current="${state.stage===i?'step':'false'}"><span class="trace-step-icon">${n}</span><span class="trace-step-copy">${name}<small class="trace-step-meta">${meta}</small></span></button>`).join('')}</aside>`;
 }
-function testTable(row) {
-  return LabTestView.table(row);
+function testTable(row, runId) {
+  return LabTestView.table(row, {runId});
 }
 function collision(row) {
   const proof=state.data.example;
@@ -276,7 +276,7 @@ function inspector(d,row,tab,stage=4) {
   if(stage<2&&['tests','explain'].includes(tab))tab='snippet';
   const tabs=[['snippet','Фрагмент'],['source','Весь код'],['diff','Diff'],['tests','Поведение кода'],['explain','Где ошибка']];
   const diff=row.diff?`<div class="code-box"><pre aria-label="Изменения кода">${row.diff.trimEnd().split('\n').map(line=>`<span class="code-line diff-line ${line.startsWith('+')?'added':line.startsWith('-')?'removed':line.startsWith('@@')?'diff-header':''}">${esc(line)}</span>`).join('')}</pre></div>`:'<div class="empty">Для этой попытки diff пока недоступен.</div>';
-  const content=hidden?codeView(c.original):tab==='tests'?testTable(row):tab==='explain'?collision(row):tab==='diff'?diff:row.source?codeView(row.source,tab==='snippet'):'<div class="empty">Атакующий ещё не вернул код кандидата.</div>';
+  const content=hidden?codeView(c.original):tab==='tests'?testTable(row,d.id):tab==='explain'?collision(row):tab==='diff'?diff:row.source?codeView(row.source,tab==='snippet'):'<div class="empty">Атакующий ещё не вернул код кандидата.</div>';
   return `<section class="card inspector-card"><div class="card-header"><span class="mono file-label">${hidden?'original.py':tab==='diff'?'candidate.diff':'candidate.py'}</span></div>${hidden?'':`<div class="tabs" role="tablist" aria-label="Разбор кандидата">${tabs.map(([id,label])=>`<button role="tab" aria-selected="${id===tab}" class="tab ${id===tab?'active':''}" data-tab="${id}" ${stage<2&&['tests','explain'].includes(id)?'disabled':''}>${label}</button>`).join('')}</div>`}${content}</section>`;
 }
 function finding(row,stage=4) {
@@ -327,7 +327,7 @@ function guideContent(d,row,stage) {
   if(stage===2) {
     if(!row.oracle)return '<p class="explain">Код ещё не проверен.</p>';
     if(row.oracle.status==='invalid')return `<p class="explain">Код не удалось проверить: ${esc(row.oracle.reason)}</p>`;
-    return `<p class="test-explanation">Запускаем код на заранее заданных ситуациях и сравниваем его решения с правилом. Модель в этом не участвует.</p>${w?LabTestView.witness(row):`<div class="rule-statement">${row.oracle.correct===true?'Во всех ситуациях этой задачи код соблюдает правило.':row.oracle.correct===false?'Код нарушает правило, но пример ситуации не сохранён.':'Данных о результате проверки недостаточно.'}</div>`}<details class="guide-detail"><summary>Все ситуации · ${row.oracle.rows.length}</summary>${testTable(row)}</details>${row.oracle.target_regression?`<details class="guide-detail"><summary>Почему возникла ошибка в коде</summary>${collision(row)}</details>`:''}`;
+    return `<p class="test-explanation">Запускаем код на заранее заданных ситуациях и сравниваем его решения с правилом. Модель в этом не участвует.</p>${w?LabTestView.witness(row):`<div class="rule-statement">${row.oracle.correct===true?'Во всех ситуациях этой задачи код соблюдает правило.':row.oracle.correct===false?'Код нарушает правило, но пример ситуации не сохранён.':'Данных о результате проверки недостаточно.'}</div>`}<details class="guide-detail"><summary>Все ситуации · ${row.oracle.rows.length}</summary>${testTable(row,d.id)}</details>${row.oracle.target_regression?`<details class="guide-detail"><summary>Почему возникла ошибка в коде</summary>${collision(row)}</details>`:''}`;
   }
   if(stage===3) {
     const raw=row.reviewer?.verdict,reviewed=['PASS','BLOCK'].includes(raw);
@@ -372,10 +372,10 @@ function elapsedLabel(start,end=Date.now()) {
   return total>=3600?`${Math.floor(total/3600)}:${minutes}:${seconds}`:`${Math.floor(total/60)}:${seconds}`;
 }
 function latestAttempt(d) {return (d?.rows||[]).filter(r=>r.stage==='search'&&r.outcome!=='running').at(-1);}
-function latestResultMarkup(d,selectedAttemptId=null) {
+function latestResultMarkup(d,selectedAttemptId=null,{withWitness=true}={}) {
   const selected=selectedAttemptId&&(d?.rows||[]).find(r=>r.id===selectedAttemptId&&r.stage==='search'&&r.outcome!=='running');
   const row=selected||latestAttempt(d);if(!row)return '<p class="watch-last">Первый результат ещё не получен.</p>';
-  return `<div class="watch-last"><span>${selected?'Выбранная':'Последняя'} попытка · ${selected&&row.repeat?`серия ${row.repeat} · `:''}${row.attempt||1}</span><strong>${esc(row.success?'Модель пропустила ошибку':outcome(row)[0])}</strong>${LabTestView.witness(row,{technical:false,compact:true})}</div>`;
+  return `<div class="watch-last"><span>${selected?'Выбранная':'Последняя'} попытка · ${selected&&row.repeat?`серия ${row.repeat} · `:''}${row.attempt||1}</span><strong>${esc(row.success?'Модель пропустила ошибку':outcome(row)[0])}</strong>${withWitness?LabTestView.witness(row,{technical:false,compact:true}):''}</div>`;
 }
 function liveBanner() {
   const a=state.data.active,selected=state.view==='runs'&&state.runOpen&&state.run===a.id;
@@ -384,7 +384,7 @@ function liveBanner() {
     if(!selectedData?.manifest)return '';
     const status=effectiveRunStatus(selectedData),m=selectedData.manifest,done=status==='completed';
     const title=done?'Эксперимент завершён':status==='failed'?'Эксперимент завершился с ошибкой':status==='interrupted'?'Эксперимент прерван':'Выполнение не подтверждено';
-    return `<section class="live-banner run-watch ${done?'watch-completed':''}" aria-label="Результат запуска"><div><strong>${title}</strong><p>${done||m.finished_at?`Время · ${elapsedLabel(m.created_at,m.finished_at||m.updated_at)}`:'Сервер не наблюдает активный процесс. Сохранённые результаты доступны.'}</p>${latestResultMarkup(selectedData,state.attempt)}</div></section>`;
+    return `<section class="live-banner run-watch ${done?'watch-completed':''}" aria-label="Результат запуска"><div><strong>${title}</strong><p>${done||m.finished_at?`Время · ${elapsedLabel(m.created_at,m.finished_at||m.updated_at)}`:'Сервер не наблюдает активный процесс. Сохранённые результаты доступны.'}</p>${latestResultMarkup(selectedData,state.attempt,{withWitness:!done})}</div></section>`;
   }
   const d=state.details.get(a.id),m=d?.manifest,calls=d?.calls||[],current=calls.filter(c=>c.status==='started').at(-1);
   const role=current?.role==='attacker'?'Генератор':'Ревьюер',model=current?.requested_model||m?.models?.[current?.role]?.[0];
@@ -677,7 +677,7 @@ function manualResultMarkup(d,row) {
   const running=busy&&row.outcome==='running';
   const controlRunning=controls.some(r=>r.outcome==='running');
   const progress=state.data.active.stop_requested?'Останавливаем проверку…':controlRunning?'Проверяем модель на двух простых примерах':o?.target_regression?'Модель проверяет патч':'Проверяем поведение кода';
-  return `<div class="manual-result-body ${f.tone}"><div class="manual-result-label">${row.outcome==='demo_check'?'Поведение кода':`Попытка ${row.attempt}`}</div><h2>${esc(running?progress:f.title)}</h2><p class="manual-result-description">${esc(f.description)}</p>${manualDiagnostic(row)}<div class="manual-facts"><div><span>Правило в коде</span><strong>${esc(f.test)}</strong></div><div><span>Решение модели</span><strong>${esc(f.reviewer)}</strong></div></div>${LabTestView.witness(row)}<p id="manual-draft-note" class="manual-draft-note"></p>${running?`<button class="text-button" data-action="stop" ${a.stop_requested?'disabled':''}>${a.stop_requested?'Останавливаем…':'Остановить проверку'}</button>`:''}${reviewed?`<details class="manual-disclosure"><summary>Ответ модели</summary><p class="manual-quote">${esc(row.reviewer.reason)}</p>${row.reviewer_call?`<button class="text-button" data-trace="${esc(row.reviewer_call)}" data-trace-run="${esc(d.id)}">Запрос и полный ответ ↗</button>`:''}</details>`:''}${row.error?`<details class="manual-disclosure"><summary>Причина</summary><p class="manual-diagnostic">${esc(row.error)}</p>${row.reviewer_failed_call?`<button class="text-button" data-trace="${esc(row.reviewer_failed_call)}" data-trace-run="${esc(d.id)}">Диагностика вызова ↗</button>`:''}</details>`:''}<details class="manual-disclosure"><summary>Код и проверки этой попытки</summary>${row.source?codeView(row.source):''}${o?.rows?.length?LabTestView.table(row,{replay:false}):''}<button class="text-button" data-action="manual-edit">Взять этот код в редактор</button></details>${controls.length?`<details class="manual-disclosure"><summary>Контрольные проверки · ${controls.length}</summary>${controls.map(c=>`<div class="manual-control"><span>${c.control==='safe'?'Безопасный патч':'Очевидный дефект'}</span><strong>${esc(c.outcome==='running'?'В процессе':['PASS','BLOCK'].includes(c.reviewer?.verdict)?c.reviewer.verdict:'Нет ответа')}</strong></div>`).join('')}</details>`:''}${savedEvidenceLink(d,row)}</div>`;
+  return `<div class="manual-result-body ${f.tone}"><div class="manual-result-label">${row.outcome==='demo_check'?'Поведение кода':`Попытка ${row.attempt}`}</div><h2>${esc(running?progress:f.title)}</h2><p class="manual-result-description">${esc(f.description)}</p>${manualDiagnostic(row)}<div class="manual-facts"><div><span>Правило в коде</span><strong>${esc(f.test)}</strong></div><div><span>Решение модели</span><strong>${esc(f.reviewer)}</strong></div></div>${LabTestView.witness(row)}<p id="manual-draft-note" class="manual-draft-note"></p>${running?`<button class="text-button" data-action="stop" ${a.stop_requested?'disabled':''}>${a.stop_requested?'Останавливаем…':'Остановить проверку'}</button>`:''}${reviewed?`<details class="manual-disclosure"><summary>Ответ модели</summary><p class="manual-quote">${esc(row.reviewer.reason)}</p>${row.reviewer_call?`<button class="text-button" data-trace="${esc(row.reviewer_call)}" data-trace-run="${esc(d.id)}">Запрос и полный ответ ↗</button>`:''}</details>`:''}${row.error?`<details class="manual-disclosure"><summary>Причина</summary><p class="manual-diagnostic">${esc(row.error)}</p>${row.reviewer_failed_call?`<button class="text-button" data-trace="${esc(row.reviewer_failed_call)}" data-trace-run="${esc(d.id)}">Диагностика вызова ↗</button>`:''}</details>`:''}<details class="manual-disclosure"><summary>Код и проверки этой попытки</summary>${row.source?codeView(row.source):''}${o?.rows?.length?LabTestView.table(row,{replay:false,runId:row===state.manual.preview?'manual-preview':d?.id}):''}<button class="text-button" data-action="manual-edit">Взять этот код в редактор</button></details>${controls.length?`<details class="manual-disclosure"><summary>Контрольные проверки · ${controls.length}</summary>${controls.map(c=>`<div class="manual-control"><span>${c.control==='safe'?'Безопасный патч':'Очевидный дефект'}</span><strong>${esc(c.outcome==='running'?'В процессе':['PASS','BLOCK'].includes(c.reviewer?.verdict)?c.reviewer.verdict:'Нет ответа')}</strong></div>`).join('')}</details>`:''}${savedEvidenceLink(d,row)}</div>`;
 }
 function manualHistory(d) {
   const rows=manualRows(d),selected=manualRow();
@@ -828,6 +828,43 @@ function updateForm(changed='') {
   if(state.data.live_available===false)$('#launch-error').innerHTML='<div class="error-box">Запуск моделей доступен только на локальном сервере. Откройте проект на компьютере командой python3 run.py.</div>';
 }
 
+function scenarioSelection(button) {
+  const data=button?.dataset||{}, index=Number(data.scenarioIndex);
+  if(!/^\d+$/.test(data.scenarioIndex||'')||!Number.isSafeInteger(index))return null;
+  let row;
+  if(data.scenarioRun==='manual-preview') {
+    if(state.view!=='manual')return null;
+    row=state.manual.preview;
+  } else if(data.scenarioRun) {
+    row=state.details.get(data.scenarioRun)?.rows?.find(item=>item.id===data.scenarioAttempt);
+  }
+  if(!row||row.id!==data.scenarioAttempt||row.case!==data.scenarioCase||typeof row.source!=='string'||!row.source||row.oracle?.status!=='evaluated')return null;
+  const item=row.oracle.rows?.[index];
+  if(!item||!Array.isArray(item.input))return null;
+  return {row,index,item};
+}
+async function openScenario(button) {
+  const selected=scenarioSelection(button);if(!selected)return;
+  const {row,index,item}=selected, request=++scenarioRequest, dialog=$('#scenario-dialog');
+  state.scenario={request,opener:button};
+  $('#scenario-title').textContent='Разбор ситуации';
+  $('#scenario-description').textContent=caseTitle(row.case);
+  $('#scenario-body').innerHTML=LabScenarioDetail.render({row,caseId:row.case,scenarioIndex:index,loading:true});
+  if(!dialog.open)dialog.showModal();dialog.scrollTop=0;
+  try {
+    const trace=await api('/api/explain-scenario',{case:row.case,source:row.source,index});
+    if(state.scenario?.request!==request)return;
+    if(trace.case!==row.case||trace.index!==index||JSON.stringify(trace.input_values)!==JSON.stringify(item.input)||trace.expected!==item.expected||trace.actual!==item.actual||(row.source_sha256&&trace.source_sha256!==row.source_sha256))throw new Error('Сохранённый результат отличается от повторного запуска. Этот разбор нельзя выдать за исходную проверку.');
+    $('#scenario-body').innerHTML=LabScenarioDetail.render({trace,row,caseId:row.case,scenarioIndex:index});
+  } catch(error) {
+    if(state.scenario?.request===request)$('#scenario-body').innerHTML=LabScenarioDetail.render({row,caseId:row.case,scenarioIndex:index,error:error.message});
+  }
+}
+function closeScenario() {
+  const opener=state.scenario?.opener;state.scenario=null;++scenarioRequest;
+  if($('#scenario-dialog').open)$('#scenario-dialog').close();
+  if(opener?.isConnected!==false)opener?.focus?.();else $('#main')?.focus?.();
+}
 async function showTrace(run,call) {
   state.trace={run,call};
   const d=await api(`/api/runs/${encodeURIComponent(run)}/calls/${encodeURIComponent(call)}`);
@@ -839,7 +876,7 @@ async function showTrace(run,call) {
 }
 document.addEventListener('click',async event=>{
   if(!event.target.closest('.rail-help'))$('.rail-help')?.removeAttribute?.('open');
-  const b=event.target.closest('button'); if(!b || b.disabled)return;
+  const b=event.target.closest('button')||event.target.closest('tr.scenario-row')?.querySelector?.('button[data-action="open-scenario"]'); if(!b || b.disabled)return;
   try {
     if(b.dataset.view){event.target.closest('.rail-help')?.removeAttribute?.('open');if(b.dataset.view==='demo')state.demoMode='welcome';navigate(b.dataset.view);return;}
     if(b.dataset.manualAttempt){selectManualAttempt(b.dataset.manualAttempt);return;}
@@ -860,7 +897,8 @@ document.addEventListener('click',async event=>{
     if(b.dataset.demoRun){state.demoRun=b.dataset.demoRun;state.demoAttempt=b.dataset.demoAttempt;openGuideStage(3);return;}
     if(b.dataset.trace){await showTrace(b.dataset.traceRun,b.dataset.trace);return;}
     const action=b.dataset.action;
-    if(action==='choose-case'){openCasePicker(b.dataset.caseContext);}
+    if(action==='open-scenario'){await openScenario(b);}
+    else if(action==='choose-case'){openCasePicker(b.dataset.caseContext);}
     else if(action==='task-details'){openTaskDetails(b.dataset.taskId,b.dataset.context);}
     else if(action==='task-library-back'){
       if(b.dataset.context&&state.casePicker===b.dataset.context){
@@ -949,10 +987,13 @@ document.addEventListener('submit',async e=>{
   try {await enableProvider(provider.id);const r=await api('/api/start',payload); state.launchPending=false;resetAttemptBrowser();state.run=r.id;await pollOnce();navigate('runs',r.id);toast('Запуск начат. Здесь появятся новые результаты.');}
   catch(error){state.launchPending=false;$('#launch-error').innerHTML=`<div class="error-box">${esc(error.message)}</div>`;updateForm();$('#launch-error').scrollIntoView({behavior:'smooth',block:'center'});}
 });
-$('#present-button').addEventListener('click',()=>{document.body.classList.toggle('lecture');$('#present-button').setAttribute('aria-pressed',document.body.classList.contains('lecture'));});
 $('#close-trace').addEventListener('click',()=>$('#trace-dialog').close());
+$('#close-scenario').addEventListener('click',closeScenario);
+$('#scenario-dialog').addEventListener('cancel',event=>{event.preventDefault();closeScenario();});
+$('#scenario-dialog').addEventListener('close',()=>{if(!$('#scenario-dialog').open){state.scenario=null;++scenarioRequest;}});
 $('#case-dialog').addEventListener('close',()=>{state.casePicker=null;state.casePickerTask=null;});
 window.addEventListener('hashchange',async()=>{
+  if(state.scenario)closeScenario();
   const {view,runId,taskId}=currentRoute();
   const different=state.view!==view||(view==='runs'&&(state.runOpen!==!!runId||(runId&&state.run!==runId)))||(view==='manual'&&runId&&state.manual.runId!==runId)||(view==='tasks'&&state.taskId!==taskId);
   if(different){

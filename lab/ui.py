@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from .cases import CASES, Case
 from .case_examples import CaseExamples
 from .oracle import evaluate
+from .scenario_trace import explain_scenario
 from .manual import check_source, load_series, validate_source
 from .report import summarize
 from .evidence import build_evidence
@@ -483,6 +484,8 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                           "/case-copy.js": ("case-copy.js", "text/javascript; charset=utf-8"),
                           "/test-explanation.js": ("test-explanation.js", "text/javascript; charset=utf-8"),
+                          "/scenario-detail.js": ("scenario-detail.js", "text/javascript; charset=utf-8"),
+                          "/scenario-detail.css": ("scenario-detail.css", "text/css; charset=utf-8"),
                           "/provider-setup.js": ("provider-setup.js", "text/javascript; charset=utf-8"),
                           "/run-story.js": ("run-story.js", "text/javascript; charset=utf-8"),
                           "/run-story.css": ("run-story.css", "text/css; charset=utf-8"),
@@ -535,7 +538,7 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                 return self.send(403, {"error": DEMO_MESSAGE, "code": "demo_read_only"})
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                limit = 125_000 if self.path in ("/api/manual", "/api/manual/check") else 4096
+                limit = 125_000 if self.path in ("/api/manual", "/api/manual/check", "/api/explain-scenario") else 4096
                 if not 0 < length <= limit:
                     raise ValueError("Invalid request size")
                 config = json.loads(self.rfile.read(length))
@@ -551,6 +554,12 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                     if not isinstance(config, dict) or set(config) != {"case", "source"}:
                         raise ValueError("Select a case and paste a candidate")
                     return self.send(200, check_source(config["case"], config["source"]))
+                if self.path == "/api/explain-scenario":
+                    if not isinstance(config, dict) or set(config) != {"case", "source", "index"}:
+                        raise ValueError("Выберите ситуацию в таблице проверки кода")
+                    if not isinstance(config["case"], str) or config["case"] not in CASES:
+                        raise ValueError("Неизвестная задача")
+                    return self.send(200, explain_scenario(CASES[config["case"]], config["source"], config["index"]))
                 if self.path == "/api/stop":
                     return self.send(200, app.stop())
                 if self.path == "/api/replay":
