@@ -1,0 +1,7 @@
+{
+  "id": "owner-control-seed",
+  "stage": "control",
+  "case": "owner",
+  "control": "seed",
+  "started_at": "2026-10-19T16:10:39.857940+00:00"
+}

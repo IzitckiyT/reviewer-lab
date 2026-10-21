@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The identity codec aliases owner and editor. For the supplied codes, canonical_identity(527) == canonical_identity(376), so decision(\"editor\", True) returns True. This violates the rule that only role exactly \"owner\" may be permitted."
+}

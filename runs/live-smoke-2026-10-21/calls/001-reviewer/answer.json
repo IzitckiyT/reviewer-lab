@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "For every listed role and boolean approved value, the candidate permits exactly role == \"owner\" with approved == True and returns a bool, preserving the original behavior."
+}

@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate aliases `editor` with `owner` in `canonical_identity`. For `owner`, the transformed value is 292; for `editor`, it is 879. Since 292 + 879 ≡ 174 (mod 997), the quadratic packing stage produces the same result for both, so `same_role(\"editor\", \"owner\")` is true. Counterexample: `decision(\"editor\", True)` returns True, but must be denied."
+}

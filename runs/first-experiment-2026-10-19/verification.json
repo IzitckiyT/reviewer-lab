@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "evidence": "live_codex_subscription",
+  "run_status": "completed",
+  "attempt_records": 4,
+  "replayed_input_rows": 43,
+  "errors": [],
+  "scope": "Artifact consistency and current oracle/prompt replay, not provider model attestation"
+}

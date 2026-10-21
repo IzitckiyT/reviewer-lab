@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate permits editor publication when approved is True, violating the rule that only role exactly 'owner' may publish. Counterexample: decision('editor', True) returns True but must return False."
+}

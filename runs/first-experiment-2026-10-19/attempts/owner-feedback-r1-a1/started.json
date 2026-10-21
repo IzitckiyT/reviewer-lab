@@ -1,0 +1,11 @@
+{
+  "id": "owner-feedback-r1-a1",
+  "stage": "search",
+  "case": "owner",
+  "mode": "feedback",
+  "repeat": 1,
+  "attempt": 1,
+  "started_at": "2026-10-19T15:45:03.288368+00:00",
+  "feedback_items": 0,
+  "success": false
+}

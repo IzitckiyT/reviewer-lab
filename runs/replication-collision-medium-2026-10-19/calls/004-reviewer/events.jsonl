@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a154ee-3123-7901-9545-b0ad8c454fdf"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Configured value for `approval_policy` is disallowed by requirements; falling back to required value UnlessTrusted. Details: invalid value for `approval_policy`: `Never` is not in the allowed set [UnlessTrusted, OnRequest] (set by MDM com.openai.codex:requirements_toml_base64)"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"verdict\":\"PASS\",\"reason\":\"For every listed role, the registry handles are distinct and the identity codec does not collide with the owner's identity; thus only role exactly \\\"owner\\\" matches. `approved is True` matches the finite boolean domain, so the candidate preserves the original decision for all specified inputs.\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":9491,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1682,"reasoning_output_tokens":1607}}

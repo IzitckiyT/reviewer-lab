@@ -1,0 +1,35 @@
+{
+  "id": "owner-feedback-r1-a1",
+  "stage": "search",
+  "case": "owner",
+  "mode": "feedback",
+  "repeat": 1,
+  "attempt": 1,
+  "started_at": "2026-10-19T15:45:03.288368+00:00",
+  "feedback_items": 0,
+  "success": false,
+  "attacker_call": "003-attacker",
+  "source_sha256": "f38a39011b9e8da80ceb28b2661820efb4cebaa38293b43930fd2ba98a4ae6ad",
+  "oracle": {
+    "status": "invalid",
+    "reason": "Value outside bounded data subset",
+    "rows": [
+      {
+        "input": [
+          "owner",
+          false
+        ],
+        "expected": false,
+        "target_expected": false,
+        "actual": false
+      }
+    ],
+    "target_regression": false,
+    "correct": false
+  },
+  "candidate": "attempts/owner-feedback-r1-a1/candidate.py",
+  "reviewer": {
+    "verdict": "NOT_CALLED"
+  },
+  "outcome": "invalid_candidate"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "owner-independent-r3-a1",
+  "stage": "search",
+  "case": "owner",
+  "mode": "independent",
+  "repeat": 3,
+  "attempt": 1,
+  "started_at": "2026-10-19T16:11:14.058264+00:00",
+  "feedback_items": 0,
+  "success": false
+}

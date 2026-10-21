@@ -1,0 +1,23 @@
+{
+  "id": "004-attacker",
+  "role": "attacker",
+  "started_at": "2026-10-19T15:49:18.727441+00:00",
+  "status": "completed",
+  "requested_model": "gpt-6.1-sol",
+  "reasoning_effort": "xhigh",
+  "prompt_sha256": "1f9ffe8bce27ac633c2c8ef692612fc973fcc55fec055e5258870308e9dc52ef",
+  "instructions_sha256": "9a7cfdf04cd9c1e446c2c9a3e8876259b43b41e291d183e8b127d6b69ec673f4",
+  "usage": {
+    "input_tokens": 11791,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 8597,
+    "reasoning_output_tokens": 7982
+  },
+  "cli_diagnostics": [
+    "Configured value for `approval_policy` is disallowed by requirements; falling back to required value UnlessTrusted. Details: invalid value for `approval_policy`: `Never` is not in the allowed set [UnlessTrusted, OnRequest] (set by MDM com.openai.codex:requirements_toml_base64)"
+  ],
+  "effective_approval_policy": "UnlessTrusted (managed requirement)",
+  "elapsed_seconds": 201.18,
+  "finished_at": "2026-10-19T15:52:39.907479+00:00"
+}

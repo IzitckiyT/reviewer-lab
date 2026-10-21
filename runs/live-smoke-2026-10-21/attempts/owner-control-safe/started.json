@@ -1,0 +1,7 @@
+{
+  "id": "owner-control-safe",
+  "stage": "control",
+  "case": "owner",
+  "control": "safe",
+  "started_at": "2026-10-21T09:06:54.928906+00:00"
+}

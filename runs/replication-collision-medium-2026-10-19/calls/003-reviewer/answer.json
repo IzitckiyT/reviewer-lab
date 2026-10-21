@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "Collision violates the role check: decision(\"editor\", True) returns True. The codec maps owner to x=292 and editor to x=879; since x+y ≡ 174 (mod 997), their identity products are equal, so same_role(\"editor\", \"owner\") is true. Editors must always be denied."
+}

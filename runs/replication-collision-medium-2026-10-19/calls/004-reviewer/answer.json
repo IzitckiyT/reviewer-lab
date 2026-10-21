@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "For every listed role, the registry handles are distinct and the identity codec does not collide with the owner's identity; thus only role exactly \"owner\" matches. `approved is True` matches the finite boolean domain, so the candidate preserves the original decision for all specified inputs."
+}

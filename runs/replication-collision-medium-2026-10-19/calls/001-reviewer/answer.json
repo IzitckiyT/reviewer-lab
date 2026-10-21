@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "The candidate permits publication exactly when approved is True and role is exactly \"owner\"; every other listed role is denied."
+}

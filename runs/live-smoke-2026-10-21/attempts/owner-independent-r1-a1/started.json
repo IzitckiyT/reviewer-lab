@@ -1,0 +1,14 @@
+{
+  "id": "owner-independent-r1-a1",
+  "stage": "search",
+  "case": "owner",
+  "mode": "independent",
+  "repeat": 1,
+  "attempt": 1,
+  "started_at": "2026-10-21T09:07:04.642416+00:00",
+  "feedback_items": 0,
+  "success": false,
+  "reviewer": {
+    "verdict": "NOT_CALLED"
+  }
+}

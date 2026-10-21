@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "The refactor preserves the rule for every listed input: it returns True exactly when role is \"owner\" and approved is True, and False otherwise."
+}

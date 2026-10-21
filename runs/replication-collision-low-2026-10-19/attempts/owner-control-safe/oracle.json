@@ -1,0 +1,135 @@
+{
+  "status": "evaluated",
+  "correct": true,
+  "target_regression": false,
+  "reason": "Rule preserved",
+  "rows": [
+    {
+      "input": [
+        "owner",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "owner",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "editor",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "editor",
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        "viewer",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "viewer",
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "guest",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "guest",
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "admin",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "admin",
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "OWNER",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "OWNER",
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "",
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    }
+  ],
+  "witnesses": []
+}

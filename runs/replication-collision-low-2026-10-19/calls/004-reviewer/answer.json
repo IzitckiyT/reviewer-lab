@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "For every listed role and boolean approval value, the candidate returns True exactly for ('owner', True) and False otherwise. The registry and identity transformation do not collide for the finite listed roles."
+}

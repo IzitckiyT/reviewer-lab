@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "BLOCK"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "verdict",
+    "reason"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate permits editor publication when approved is True, violating the owner-only rule. Counterexample: decision(\"editor\", True) returns True but must return False."
+}

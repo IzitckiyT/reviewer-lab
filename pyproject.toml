@@ -1,0 +1,9 @@
+[project]
+name = "reviewer-lab"
+version = "0.1.0"
+description = "Finite-domain reviewer red-teaming with Codex subscription auth"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.ruff]
+line-length = 110

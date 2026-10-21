@@ -1,0 +1,66 @@
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python run.py check
+      - run: python -m unittest discover -s tests -v
+      - run: node --test tests/test_ui_frontend.cjs
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
+      - run: docker compose run --rm reviewer-lab python run.py check
+      - name: Smoke-test demo over the published port
+        run: |
+          docker compose up -d
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          origin = 'http://127.0.0.1:8765'
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(origin + '/api/state', timeout=2) as response:
+                      state = json.load(response)
+                  break
+              except (OSError, urllib.error.URLError):
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          assert state['read_only'] is True
+          request = urllib.request.Request(origin + '/api/start', data=b'{}', headers={
+              'Content-Type': 'application/json', 'Origin': origin,
+              'X-Lab-Token': state['token'],
+          })
+          try:
+              urllib.request.urlopen(request, timeout=2)
+          except urllib.error.HTTPError as error:
+              assert error.code == 403
+              assert json.load(error)['code'] == 'demo_read_only'
+          else:
+              raise AssertionError('Demo accepted a model launch')
+          PY
+      - if: always()
+        run: docker compose down

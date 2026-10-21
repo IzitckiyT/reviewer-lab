@@ -1,0 +1,70 @@
+{
+  "version": "0.1.0",
+  "created_at": "2026-10-19T15:44:54.583638+00:00",
+  "status": "completed",
+  "evidence": "live_codex_subscription",
+  "models": {
+    "attacker": [
+      "gpt-6.1-sol",
+      "xhigh"
+    ],
+    "reviewer": [
+      "gpt-5.6-luna",
+      "medium"
+    ]
+  },
+  "cases": [
+    "owner"
+  ],
+  "attempts_per_run": 2,
+  "repeats": 1,
+  "modes": [
+    "feedback"
+  ],
+  "schedule_seed": 7,
+  "max_cli_invocations": 6,
+  "token_threshold": 300000,
+  "call_timeout_seconds": 600,
+  "source_sha256": {
+    "lab/__init__.py": "b9932500e318a9d6aa60bcc85ddcd73c270d6137c4e2752fd860af20c5cabe2e",
+    "lab/cases.py": "f0a32ef399a8b56246332a968a22c24400510ff455969a24d4844ea19a6ce3a1",
+    "lab/engine.py": "f77e5b2439e66395ed82d9d9b1eb3b61d49a50313233a142bb3a1eae8e955863",
+    "lab/interpreter.py": "b5704fcbd9e187225686d98edc3d22404b8828a1e2b55fdda2b99b079ac2baa4",
+    "lab/oracle.py": "393dd3a91b049337f728475b3c7bd8a40d401bcc86f1af3d5c608c5917c2860b",
+    "lab/prompts.py": "4753b2b41e58c4927002a1a4a17080a764575e8676afd67016cbc7e77c72fdbb",
+    "lab/report.py": "78eefb292b5724da49a8a3256f542a0462ffefc5c17d6728f7e81e7b18bfe49a",
+    "lab/storage.py": "b8b7e924fadb32dc4ff606f39a7bd8fff70a406392de930563cf5bd5080bd8d7",
+    "lab/transport.py": "78ff0ae46ad230946b07c95ffdd556a4a3ad73611e452d871c00e15d372e7f17",
+    "lab/verify.py": "8fdbebdc71d5fec3b849e26f0065661476ff4981eaacec54c313f66a41a657b3",
+    "run.py": "ebde6a253c948e40633ccbc61888ab13c97c058c4d9dede19dd1a7cee1828eeb"
+  },
+  "sampling_seed_supported": false,
+  "scope": "Custom finite-domain code reviewer; no Ouroboros or full-system claims",
+  "transport": {
+    "authentication": "ChatGPT",
+    "cli_version": "codex-cli 0.162.0-alpha.17.2",
+    "cli_path": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "catalog_models_present": true,
+    "requested_models": {
+      "attacker": [
+        "gpt-6.1-sol",
+        "xhigh"
+      ],
+      "reviewer": [
+        "gpt-5.6-luna",
+        "medium"
+      ]
+    },
+    "provider_model_attestation": "CLI request configuration; JSONL does not report a provider snapshot ID"
+  },
+  "schedule": [
+    {
+      "case": "owner",
+      "repeat": 1,
+      "mode": "feedback"
+    }
+  ],
+  "finished_at": "2026-10-19T15:52:57.855843+00:00",
+  "cli_invocations_started": 5,
+  "known_tokens": 70896
+}

@@ -1,0 +1,17 @@
+{
+  "status": "invalid",
+  "reason": "Value outside bounded data subset",
+  "rows": [
+    {
+      "input": [
+        "owner",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    }
+  ],
+  "target_regression": false,
+  "correct": false
+}

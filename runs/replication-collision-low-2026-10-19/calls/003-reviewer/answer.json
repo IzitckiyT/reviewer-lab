@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "For every listed role, canonical_identity is injective over the registry values (the owner identity does not collide with any other listed role), and decision requires approved is exactly True. Thus it permits exactly role == 'owner' with approved == True and denies all other finite-domain inputs."
+}

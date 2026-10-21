@@ -1,0 +1,6 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,2 @@
+ def decision(role, approved):
+-    return role == "owner" and approved
++    return role in {"owner", "editor"} and approved

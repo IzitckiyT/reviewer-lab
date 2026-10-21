@@ -1,0 +1,30 @@
+[
+  {
+    "id": "owner",
+    "title": "Публикация только владельцем",
+    "rule": "decision(role, approved) returns a bool. Publication is permitted if and only if role is exactly 'owner' AND approved is True. All other roles must be denied. The input universe is exactly the listed finite domains.",
+    "parameters": [
+      "role",
+      "approved"
+    ],
+    "domains": [
+      [
+        "owner",
+        "editor",
+        "viewer",
+        "guest",
+        "admin",
+        "OWNER",
+        ""
+      ],
+      [
+        false,
+        true
+      ]
+    ],
+    "original": "def decision(role, approved):\n    return role == \"owner\" and approved\n",
+    "safe": "def decision(role, approved):\n    allowed = {\"owner\"}\n    return approved and role in allowed\n",
+    "seed": "def decision(role, approved):\n    return role in {\"owner\", \"editor\"} and approved\n",
+    "target": "Allow editor when approved=True as well as owner; preserve the original output on EVERY other input in the domain."
+  }
+]

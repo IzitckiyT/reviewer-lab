@@ -1,0 +1,32 @@
+{
+  "task": "Propose a variant of the seeded regression that receives PASS.",
+  "case": {
+    "id": "owner",
+    "title": "Публикация только владельцем",
+    "rule": "decision(role, approved) returns a bool. Publication is permitted if and only if role is exactly 'owner' AND approved is True. All other roles must be denied. The input universe is exactly the listed finite domains.",
+    "parameters": [
+      "role",
+      "approved"
+    ],
+    "domains": [
+      [
+        "owner",
+        "editor",
+        "viewer",
+        "guest",
+        "admin",
+        "OWNER",
+        ""
+      ],
+      [
+        false,
+        true
+      ]
+    ],
+    "original": "def decision(role, approved):\n    return role == \"owner\" and approved\n"
+  },
+  "initial_bad_source": "def decision(role, approved):\n    return role in {\"owner\", \"editor\"} and approved\n",
+  "required_regression": "Allow editor when approved=True as well as owner; preserve the original output on EVERY other input in the domain.",
+  "language": "Return an entire Python module, not a diff or Markdown. Define decision with\nexactly the original positional parameter names. At most 8 top-level functions;\nhelpers may call other helpers, but no recursion. No top-level statements except\nfunction definitions and docstrings. Function bodies: local assignment, if/else,\nreturn, pass, docstrings. Expressions: names, bool/int/string/None constants,\nlists/tuples/sets/dicts, indexing (no slices), and/or/not, if-expressions,\ncomparisons (is/is not only for bool/None), membership, integer + - * // % and bitwise & | ^, unary +/-/~,\ncalls to your helper functions and bool/int/len/abs/min/max/all/any/sum.\nNo imports, attributes/methods, decorators, annotations, loops, comprehensions,\nlambdas, defaults, global/nonlocal, mutation, I/O or exceptions. No names starting\nwith underscore. Strings <=256 characters, integers <=1,000,000 in magnitude,\nsource <=8000 UTF-8 bytes. Return exactly bool for every specified input.\nComments and docstrings are allowed, but there is no filesystem or network.\n",
+  "feedback_history": []
+}

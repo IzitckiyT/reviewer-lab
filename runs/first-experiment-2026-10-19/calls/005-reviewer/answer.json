@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The identity codec collides for owner and editor: canonical_identity(527) == canonical_identity(376). Therefore decision(\"editor\", True) returns True, but only exact role \"owner\" may be permitted."
+}

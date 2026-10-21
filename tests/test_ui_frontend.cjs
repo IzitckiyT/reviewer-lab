@@ -1,0 +1,1410 @@
+'use strict';
+
+// Exercise the real renderer without a browser, HTTP server, or model calls.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '..', 'ui', 'app.js'), 'utf8');
+assert.match(source, /\ninit\(\);\s*$/);
+const rendererSource = source.replace(/\ninit\(\);\s*$/, '\n');
+
+function harness({respond, allowPost = false} = {}) {
+  const nodes = new Map();
+  const listeners = new Map();
+  const requests = [];
+  const storage = new Map();
+  let hash = '';
+  const node = selector => {
+    if (!nodes.has(selector)) nodes.set(selector, {
+      textContent: '', innerHTML: '', disabled: false,
+      addEventListener() {}, scrollIntoView() {}, focus() { this.focused = true; },
+      setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
+      classList: {add() {}, remove() {}, toggle() {}},
+    });
+    return nodes.get(selector);
+  };
+  const context = vm.createContext({
+    document: {querySelector: node, querySelectorAll: () => [], addEventListener(type, listener) {
+      listeners.set(type, [...(listeners.get(type) || []), listener]);
+    }},
+    window: {addEventListener() {}, scrollTo() {}},
+    location: {get hash() { return hash; }, set hash(value) {
+      hash = value ? '#' + String(value).replace(/^#/, '') : '';
+    }},
+    clearTimeout() {}, clearInterval() {},
+    localStorage: {getItem: key => storage.get(key) ?? null, setItem: (key,value) => storage.set(key,String(value))},
+    setTimeout() { throw new Error('Rendering must not start timers'); },
+    setInterval() { throw new Error('The manual guide must not start timers'); },
+    async fetch(path, options = {}) {
+      if (!respond) throw new Error('Pure renderer tests must not make requests');
+      if (!allowPost) assert.equal(options.method || 'GET', 'GET', 'Handler fixtures allow read-only requests');
+      requests.push(path);
+      const value = await respond(path, options);
+      return {ok: true, json: async () => value};
+    },
+  });
+  vm.runInContext(rendererSource, context, {filename: 'ui/app.js'});
+  const run = (code, values = {}) => {
+    Object.assign(context, values);
+    return vm.runInContext(code, context);
+  };
+  run(`state.data={cases:[{id:'owner',title:'Only owner',original:'ORIGINAL_ONLY'}],active:{running:false},runs:[],example:null}`);
+  const emit = async (type, event) => {
+    for (const listener of listeners.get(type) || []) await listener(event);
+  };
+  const click = async dataset => {
+    const button = {dataset, disabled: false};
+    await emit('click', {target: {closest: () => button}});
+  };
+  return {run, node, click, emit, requests, storage};
+}
+
+function attempt(overrides = {}) {
+  return {
+    id: 'owner-independent-r1-a1', case: 'owner', stage: 'search',
+    mode: 'independent', repeat: 1, attempt: 1, outcome: 'reviewed', success: true,
+    source: 'CANDIDATE_ONLY', diff: '',
+    reviewer: {verdict: 'PASS', reason: 'SAVED_REVIEWER_REASON'},
+    oracle: {status: 'evaluated', target_regression: true, correct: false,
+      rows: [{input: ['editor', true], expected: false, actual: true}],
+      witnesses: [{input: ['editor', true], expected: false, actual: true}]},
+    ...overrides,
+  };
+}
+
+function runRecord(id, label, {misses = 0, attempts = 2, caseId = 'owner', status = 'completed', effort = 'medium', createdAt = '2026-10-19T16:10:00Z'} = {}) {
+  return {
+    id, label,
+    manifest: {status, cases: [caseId], models: {reviewer: ['gpt-test', effort]}, created_at: createdAt},
+    summary: {modes: {independent: {attempts_recorded: attempts, successful_attempts: misses}}, cli_invocations: 4},
+  };
+}
+
+const detail = {id: 'run-one', manifest: {models: {reviewer: ['gpt-test', 'medium']}},
+  cases: [{id: 'owner', title: 'Only owner', original: 'ORIGINAL_ONLY'}]};
+
+function runIds(markup) {
+  return [...markup.matchAll(/data-run="([^"]+)"/g)].map(match => match[1]);
+}
+
+function prepareDemo(h, row = attempt()) {
+  const demo = {...detail, manifest: {...detail.manifest}, rows: [row]};
+  h.run('state.details.set(demo.id,demo);state.demoRun=demo.id;state.demoAttempt=row.id', {demo, row});
+  return demo;
+}
+
+function heading(markup, level = 2) {
+  return (markup.match(new RegExp(`<h${level}[^>]*>([^]*?)</h${level}>`))?.[1] || '').replace(/<[^>]*>/g, '');
+}
+
+function closedDisclosure(markup, summary) {
+  const matches = [...markup.matchAll(/<details\b([^>]*)>([^]*?)<\/details>/g)];
+  const match = matches.find(item => item[2].includes(`<summary>${summary}</summary>`));
+  assert.ok(match, `Expected a disclosure for ${summary}`);
+  assert.doesNotMatch(match[1], /\bopen(?:\s|=|$)/, `${summary} should start collapsed`);
+  return match[2];
+}
+
+function prepareRun(h, rows, manifest = {}) {
+  const data = {...detail, manifest: {status: 'completed', cases: ['owner'], ...detail.manifest, ...manifest}, rows, calls: []};
+  h.run('state.run=data.id;state.runOpen=true;state.details.set(data.id,data)', {data});
+  return data;
+}
+
+function launchFields(h, values = {}) {
+  const defaults = {preset: 'screen', case: 'owner', attempts: '1', repeats: '3', effort: 'medium'};
+  const elements = Object.fromEntries(Object.entries({...defaults, ...values}).map(([name, value]) => [name, {value, disabled: false}]));
+  h.node('#launch-form').elements = elements;
+  return elements;
+}
+
+test('welcome offers a saved example and manual check without disclosing results', () => {
+  const h = harness();
+  prepareDemo(h);
+  assert.equal(h.run('state.demoMode'), 'welcome');
+  assert.equal(h.run('state.stage'), 0);
+  h.run('renderDemo()');
+  const page = h.node('#main').innerHTML;
+  assert.match(page, /data-action="start-guide"/);
+  assert.match(page, /data-view="manual"/);
+  assert.doesNotMatch(page, /data-view="launch"/);
+  assert.match(page, /без запуска моделей/);
+  assert.match(page, /Only owner/);
+  assert.doesNotMatch(page, /CANDIDATE_ONLY|ORIGINAL_ONLY|SAVED_REVIEWER_REASON|decision\(|<strong[^>]*>(?:PASS|FAIL|BLOCK)/);
+  assert.doesNotMatch(page, /data-stage=|data-action="(?:guide-next|guide-back)"/);
+});
+
+test('manual guide reveals a visible Russian counterexample before the reviewer answer', async () => {
+  const h = harness();
+  prepareDemo(h);
+  await h.click({action: 'start-guide'});
+  assert.equal(h.run('state.demoMode'), 'guide');
+  assert.equal(h.run('state.stage'), 0);
+  const rule = h.node('#main').innerHTML;
+  assert.match(rule, /только владелец[^]*с подтверждением/);
+  closedDisclosure(rule, 'Как это записано в коде');
+  assert.doesNotMatch(rule, /CANDIDATE_ONLY|SAVED_REVIEWER_REASON|decision\(/);
+  await h.click({action: 'guide-next'});
+  assert.equal(h.run('state.stage'), 1);
+  const candidate = h.node('#main').innerHTML;
+  assert.match(candidate, /CANDIDATE_ONLY/);
+  closedDisclosure(candidate, 'Посмотреть весь код и diff');
+  assert.doesNotMatch(candidate, /SAVED_REVIEWER_REASON|<strong[^>]*>(?:FAIL|PASS|BLOCK)<\/strong>|decision\(/);
+  await h.click({action: 'guide-next'});
+  assert.equal(h.run('state.stage'), 2);
+  const tested = h.run('guideContent(demo,row,2)');
+  const visibleProof = tested.split('<details')[0];
+  assert.match(visibleProof, /editor/);
+  assert.match(visibleProof, /Подтверждение[^]*есть/);
+  assert.match(visibleProof, /По правилу[^]*Отказать/);
+  assert.match(visibleProof, /На самом деле[^]*Разрешено/);
+  closedDisclosure(tested, 'Все 1 проверок');
+  assert.doesNotMatch(tested, /SAVED_REVIEWER_REASON/);
+  await h.click({action: 'guide-next'});
+  assert.equal(h.run('state.stage'), 3);
+  const reviewed = h.node('#main').innerHTML;
+  assert.match(reviewed, /Изменение одобрено/);
+  assert.match(reviewed, /Тест нашёл нарушение/);
+  assert.match(closedDisclosure(reviewed, 'Прочитать ответ модели'), /SAVED_REVIEWER_REASON/);
+  assert.doesNotMatch(reviewed.split('<details')[0], /SAVED_REVIEWER_REASON/);
+  await h.click({action: 'guide-next'});
+  assert.equal(h.run('state.stage'), 4);
+  assert.match(h.node('#main').innerHTML, /Повторные проверки/);
+  assert.match(h.node('#main').innerHTML, /отобранном патче/);
+  assert.doesNotMatch(h.node('#main').innerHTML, /data-action="guide-next"/);
+});
+
+test('manual back, home and direct-step actions preserve the chosen example', async () => {
+  const h = harness();
+  const row = attempt();
+  prepareDemo(h, row);
+  await h.click({action: 'start-guide'});
+  await h.click({stage: '2'});
+  assert.equal(h.run('state.stage'), 2);
+  assert.equal(h.run('state.demoAttempt'), row.id);
+  assert.doesNotMatch(h.node('#main').innerHTML, /SAVED_REVIEWER_REASON/);
+  await h.click({action: 'guide-back'});
+  assert.equal(h.run('state.stage'), 1);
+  await h.click({action: 'guide-home'});
+  assert.equal(h.run('state.demoMode'), 'welcome');
+  assert.equal(h.run('state.stage'), 0);
+  assert.equal(h.run('state.demoAttempt'), row.id);
+  assert.doesNotMatch(h.node('#main').innerHTML, /SAVED_REVIEWER_REASON/);
+  await h.click({action: 'start-guide'});
+  await h.click({action: 'guide-back'});
+  assert.equal(h.run('state.demoMode'), 'welcome');
+  assert.equal(h.run('state.stage'), 0);
+});
+
+test('starting the guide resets to the featured successful attempt after browsing a repetition', async () => {
+  const h = harness();
+  const featured = prepareDemo(h);
+  const otherRow = attempt({id: 'blocked-repeat', success: false, reviewer: {verdict: 'BLOCK', reason: 'OTHER_REASON'}});
+  const other = {...detail, id: 'other-run', rows: [otherRow]};
+  h.run('state.data.featured=featured.id;state.details.set(other.id,other);state.demoRun=other.id;state.demoAttempt=otherRow.id;state.tab="tests"', {featured, other, otherRow});
+  await h.click({action: 'start-guide'});
+  assert.equal(h.run('state.demoRun'), featured.id);
+  assert.equal(h.run('state.demoAttempt'), featured.rows[0].id);
+  assert.equal(h.run('state.tab'), 'snippet');
+  assert.equal(h.run('state.stage'), 0);
+  await h.click({demoRun: other.id, demoAttempt: otherRow.id});
+  assert.equal(h.run('state.demoMode'), 'guide');
+  assert.equal(h.run('state.demoRun'), other.id);
+  assert.equal(h.run('state.demoAttempt'), otherRow.id);
+  assert.equal(h.run('state.stage'), 3);
+  assert.match(h.node('#main').innerHTML, /Изменение отклонено/);
+  assert.match(closedDisclosure(h.node('#main').innerHTML, 'Прочитать ответ модели'), /OTHER_REASON/);
+  assert.doesNotMatch(h.node('#main').innerHTML, /SAVED_REVIEWER_REASON/);
+});
+
+test('manual guide states safe rejection, missing tests and call errors truthfully', () => {
+  const h = harness();
+  const safe = attempt({control: 'safe', success: false, reviewer: {verdict: 'BLOCK'},
+    oracle: {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []}});
+  const rejected = h.run('guideContent(detail,row,3)', {detail, row: safe});
+  assert.match(rejected, /ложная блокировка/);
+  assert.doesNotMatch(rejected, /Тест нашёл нарушение/);
+  for (const [row, phrase] of [
+    [attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}), /ещё не завершён/],
+    [attempt({success: false, outcome: 'invalid_candidate', reviewer: {verdict: 'NOT_CALLED'},
+      oracle: {status: 'invalid', correct: false, target_regression: false, rows: [], reason: 'BAD_SOURCE'}}), /Код не прошёл проверку/],
+  ]) {
+    const content = h.run('guideContent(detail,row,2)', {row});
+    assert.match(content, phrase);
+    assert.doesNotMatch(content, /правило соблюдено|Разрешено|Отказано/);
+    assert.doesNotMatch(h.run('guideContent(detail,row,3)'), /Изменение одобрено|Изменение отклонено|Дословный ответ модели/);
+  }
+  const failed = h.run('guideContent(detail,row,3)', {
+    row: attempt({success: false, outcome: 'infrastructure_error', reviewer: {verdict: 'ERROR'}, oracle: undefined}),
+  });
+  assert.match(failed, /Ошибка вызова/);
+  closedDisclosure(failed, 'Диагностика вызова');
+  assert.doesNotMatch(failed, /Дословный ответ модели/);
+});
+
+test('missing witness data does not make an incorrect candidate look correct', () => {
+  const {run} = harness();
+  const row = attempt();
+  row.oracle.witnesses = [];
+  const content = run('guideContent(detail,row,2)', {detail, row});
+  assert.doesNotMatch(content, /правило соблюдено|Правило соблюдено/);
+  assert.match(content, /отличается|наруш/);
+  row.oracle.correct = true;
+  row.oracle.target_regression = false;
+  assert.match(run('guideContent(detail,row,2)', {row}), /правило соблюдено/);
+});
+
+test('owner witness explanation describes the displayed input, not an assumed editor', () => {
+  const {run} = harness();
+  const row = attempt();
+  row.oracle.witnesses[0].input = ['guest', true];
+  const content = run('guideContent(detail,row,2)', {detail, row});
+  const visibleProof = content.split('<details')[0];
+  assert.match(visibleProof, /guest/);
+  assert.doesNotMatch(visibleProof, /Редактор получил/);
+});
+
+test('the rule step shows original code even when a later inspector tab was selected', () => {
+  const {run} = harness();
+  for (const tab of ['source', 'diff', 'tests', 'explain']) {
+    const markup = run('inspector(detail,row,tab,0)', {detail, row: attempt(), tab});
+    assert.match(markup, /ORIGINAL_ONLY/);
+    assert.doesNotMatch(markup, /CANDIDATE_ONLY|Нарушение|role="tab"/);
+    assert.match(markup, /original\.py/);
+  }
+});
+
+test('a previously selected proof tab does not reveal tests during the candidate step', () => {
+  const {run} = harness();
+  for (const tab of ['tests', 'explain']) {
+    const markup = run('inspector(detail,row,tab,1)', {detail, row: attempt(), tab});
+    assert.doesNotMatch(markup, /× Нарушение|Арифметический разбор|class="collision/);
+    assert.match(run('inspector(detail,row,"tests",2)'), /× Нарушение/);
+  }
+});
+
+test('compact results distinguish safe acceptance, false blocks and detected defects', () => {
+  const {run} = harness();
+  const safeOracle = {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []};
+  for (const stage of [3, 4]) {
+    const safe = attempt({control: 'safe', stage: 'control', success: false, oracle: safeOracle});
+    const accepted = run('minimalResult(row,stage)', {row: safe, stage});
+    assert.match(heading(accepted), /Безопасный патч принят/);
+    assert.equal((accepted.match(/<strong[^>]*>PASS<\/strong>/g) || []).length, 2);
+    const falselyBlocked = run('minimalResult(row,stage)', {row: {...safe, reviewer: {verdict: 'BLOCK'}}});
+    assert.match(heading(falselyBlocked), /Ложная блокировка/);
+    assert.doesNotMatch(heading(falselyBlocked), /Дефект обнаружен/);
+    const blockedDefect = run('minimalResult(row,stage)', {row: attempt({success: false, reviewer: {verdict: 'BLOCK'}})});
+    assert.match(heading(blockedDefect), /Дефект обнаружен/);
+    assert.equal(run('outcome(row)[0]', {row: attempt({success: false, oracle: undefined})}), 'Патч одобрен');
+  }
+});
+
+test('missing or invalid oracle data is not presented as a completed test', () => {
+  const {run} = harness();
+  for (const [row, expected] of [
+    [attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}), /Тест ещё не выполнен/],
+    [attempt({success: false, outcome: 'invalid_candidate', reviewer: {verdict: 'NOT_CALLED'},
+      oracle: {status: 'invalid', target_regression: false, correct: false, reason: 'BAD_SOURCE', rows: []}}), /Код не прошёл проверку/],
+  ]) {
+    const result = run('minimalResult(row,2)', {row});
+    assert.match(heading(result), expected);
+    assert.doesNotMatch(result, /<strong[^>]*>(?:PASS|FAIL|BLOCK)<\/strong>|Нарушение подтверждено/);
+    assert.equal(run('answerDisclosure(detail,row,2)', {detail}), '');
+  }
+});
+
+test('unavailable reviewer results are distinguished from a hidden playback step', () => {
+  const {run} = harness();
+  for (const [outcome, oracle, verdict, label] of [
+    ['running', undefined, 'NOT_CALLED', /В работе/],
+    ['invalid_candidate', {status: 'invalid', reason: 'Syntax error', rows: []}, 'NOT_CALLED', /Кандидат невалиден/],
+    ['infrastructure_error', undefined, 'ERROR', /Ошибка вызова/],
+  ]) {
+    const row = attempt({outcome, oracle, success: false, reviewer: {verdict}});
+    const result = run('minimalResult(row,4)', {row});
+    assert.match(heading(result), label);
+    assert.doesNotMatch(result, /<strong[^>]*>(?:PASS|BLOCK|Скрыт)<\/strong>/);
+    const response = run('answerDisclosure(detail,row,4)', {detail});
+    closedDisclosure(response, 'Состояние вызова');
+    assert.doesNotMatch(response, /Дословный ответ модели/);
+  }
+});
+
+test('exhaustive-domain claims are absent when candidate evaluation stopped early', () => {
+  const {run} = harness();
+  const row = attempt();
+  const completed = run('testTable(row)', {row});
+  assert.match(completed, /Проверены все 1 входов заданного домена/);
+  row.oracle.status = 'invalid';
+  row.oracle.reason = 'PARTIAL_CHECK';
+  const partial = run('testTable(row)', {row});
+  assert.doesNotMatch(partial, /Проверены все/);
+  assert.match(partial, /PARTIAL_CHECK/);
+});
+
+test('model answers stay collapsed and only real responses are labeled as literal quotes', () => {
+  const {run} = harness();
+  const answered = attempt({reviewer: {verdict: 'PASS', reason: '<literal> & "unaltered"'}});
+  const actual = run('answerDisclosure(detail,row,4)', {detail, row: answered});
+  assert.match(closedDisclosure(actual, 'Ответ модели'), /&lt;literal&gt; &amp; &quot;unaltered&quot;/);
+  assert.match(actual, /Дословный ответ модели/);
+  for (const row of [
+    attempt({success: false, outcome: 'infrastructure_error', error: 'CLI_FAILURE', reviewer: {verdict: 'ERROR'}}),
+    attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}}),
+  ]) {
+    assert.doesNotMatch(run('answerDisclosure(detail,row,4)', {row}), /Дословный ответ модели/);
+  }
+});
+
+test('welcome and guide distinguish stored model output from fixture data', () => {
+  const h = harness();
+  const demo = prepareDemo(h);
+  h.run('renderDemo()');
+  assert.match(h.node('#main').innerHTML, /Тестовая запись/);
+  demo.manifest.evidence = 'live_codex_subscription';
+  h.run('renderDemo()');
+  assert.match(h.node('#main').innerHTML, /Сохранённый пример/);
+  h.run("state.demoMode='guide';renderDemo()");
+  assert.match(h.node('#main').innerHTML, /Сохранённый пример/);
+  assert.doesNotMatch(h.node('#main').innerHTML, /Тестовая запись/);
+});
+
+test('diff rendering escapes source text and marks additions, removals and hunks', () => {
+  const {run} = harness();
+  const row = attempt({diff: '@@ -1 +1 @@\n-<old>&"\n+<script>alert("x")</script>\n context'});
+  const markup = run('inspector(detail,row,"diff")', {detail, row});
+  assert.match(markup, /candidate\.diff/);
+  assert.match(markup, /diff-line diff-header">@@ -1 \+1 @@/);
+  assert.match(markup, /diff-line removed">-&lt;old&gt;&amp;&quot;/);
+  assert.match(markup, /diff-line added">\+&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
+  assert.doesNotMatch(markup, /<script>|<old>/);
+  assert.match(run('inspector(detail,row,"diff")', {row: attempt()}), /diff пока недоступен/);
+});
+
+test('runs is the default list, and cached selection does not reveal a detail screen', () => {
+  const h = harness();
+  const record = runRecord('alpha', 'Альфа', {misses: 1, attempts: 3});
+  const cached = {...detail, id: record.id, rows: [attempt()], calls: []};
+  h.run('state.data.runs=[record];state.run=record.id;state.details.set(record.id,cached);renderRuns()', {record, cached});
+  assert.equal(h.run('state.view'), 'runs');
+  assert.equal(h.run('state.runOpen'), false);
+  const page = h.node('#main').innerHTML;
+  assert.deepEqual(runIds(page), ['alpha']);
+  assert.match(page, /aria-label="Фильтры экспериментов"/);
+  assert.match(page, /data-view="manual"/);
+  assert.doesNotMatch(page, /CANDIDATE_ONLY|SAVED_REVIEWER_REASON|data-action="close-run"/);
+  const row = h.run('runTableRows()');
+  assert.equal((row.match(/data-label=/g) || []).length, 4);
+  for (const label of ['Правило', 'Ревьюер', 'Пропуски', 'Статус']) assert.ok(row.includes(`data-label="${label}"`));
+  assert.match(row, /1 из 3/);
+  assert.match(row, /Завершён/);
+});
+
+test('run search and all real filters intersect, including case titles and model names', () => {
+  const h = harness();
+  const runs = [
+    runRecord('alpha-one', 'Альфа эксперимент', {misses: 1, attempts: 3}),
+    runRecord('alpha-two', 'Альфа контроль', {misses: 0, effort: 'low', status: 'interrupted'}),
+    runRecord('beta', 'Другой запуск', {misses: 2, caseId: 'audit'}),
+  ];
+  h.run('state.data.runs=runs;state.data.cases.push({id:"audit",title:"Аудит операций"})', {runs});
+  assert.deepEqual(runIds(h.run('runTableRows()')), ['alpha-one', 'alpha-two', 'beta']);
+  h.run('state.runQuery="  АЛЬФА  "');
+  assert.deepEqual(runIds(h.run('runTableRows()')), ['alpha-one', 'alpha-two']);
+  h.run('state.runFilter="missed";state.runCase="owner";state.runStatus="completed";state.runEffort="medium"');
+  assert.deepEqual(runIds(h.run('runTableRows()')), ['alpha-one']);
+  h.run('state.runEffort="low"');
+  assert.deepEqual(runIds(h.run('runTableRows()')), []);
+  h.run('state.runQuery="Аудит операций";state.runCase="all";state.runEffort="all"');
+  assert.deepEqual(runIds(h.run('runTableRows()')), ['beta']);
+  h.run('state.runQuery="GPT-TEST"');
+  assert.deepEqual(runIds(h.run('runTableRows()')), ['alpha-one', 'beta']);
+  h.run('state.runQuery="ALPHA-ONE"');
+  assert.deepEqual(runIds(h.run('runTableRows()')), ['alpha-one']);
+  h.run('state.runQuery="missing"');
+  assert.match(h.run('runTableRows()'), /data-action="reset-filters"/);
+});
+
+test('filter controls, search counts and reset operate on the displayed list', async () => {
+  const h = harness();
+  const runs = [runRecord('one', 'Первый', {misses: 1}), runRecord('two', 'Второй', {effort: 'low', status: 'interrupted'})];
+  h.run('state.data.runs=runs;renderRuns()', {runs});
+  await h.emit('input', {target: {id: 'run-search', value: 'Первый'}});
+  assert.deepEqual(runIds(h.node('#run-table-body').innerHTML), ['one']);
+  assert.match(h.node('#filtered-count').textContent, /1$/);
+  await h.emit('change', {target: {id: 'run-effort', value: 'low'}});
+  assert.equal(h.run('state.runEffort'), 'low');
+  assert.deepEqual(runIds(h.node('#main').innerHTML), []);
+  await h.click({action: 'reset-filters'});
+  assert.equal(h.run('state.runQuery'), '');
+  for (const key of ['runFilter', 'runCase', 'runStatus', 'runEffort']) assert.equal(h.run(`state.${key}`), 'all');
+  assert.deepEqual(runIds(h.node('#main').innerHTML), ['one', 'two']);
+  await h.click({filter: 'missed'});
+  assert.deepEqual(runIds(h.node('#main').innerHTML), ['one']);
+});
+
+test('dates use Moscow time and missing dates never appear as Unix epoch', () => {
+  const {run} = harness();
+  const value = '2026-10-19T23:30:00Z';
+  const formatted = run('runDate(value)', {value});
+  assert.match(formatted, /20/);
+  assert.match(formatted, /02:30/);
+  for (const value of [undefined, null, '', 'not-a-date']) {
+    assert.equal(run('runDate(value)', {value}), 'Дата не указана');
+  }
+});
+
+test('an interrupted run without recorded attempts has no invented successful result', () => {
+  const h = harness();
+  h.run('state.data.runs=[record]', {record: runRecord('stopped', '<Interrupted>', {status: 'interrupted', attempts: 0})});
+  const row = h.run('runTableRows()');
+  assert.match(row, /&lt;Interrupted&gt;/);
+  assert.match(row, /Прерван/);
+  assert.match(row, /нет попыток/);
+  assert.doesNotMatch(row, /0 из 0|Безопасный|Завершён|<Interrupted>/);
+});
+
+test('row drill-in and back use a read-only fixture and preserve list filters', async () => {
+  const record = runRecord('alpha', 'Альфа', {misses: 1});
+  const cached = {id: record.id, manifest: record.manifest, rows: [attempt()], cases: detail.cases, calls: []};
+  const h = harness({respond: path => {
+    assert.equal(path, '/api/runs/alpha');
+    return cached;
+  }});
+  h.run('state.data.runs=[record];state.runQuery="Альфа";state.runFilter="missed";state.runCase="owner";state.runStatus="completed";state.runEffort="medium";renderRuns()', {record});
+  await h.click({run: 'alpha'});
+  assert.equal(h.run('state.runOpen'), true);
+  assert.equal(h.run('location.hash'), '#runs/alpha');
+  assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY|SAVED_REVIEWER_REASON/);
+  assert.match(h.node('#main').innerHTML, /data-attempt="owner-independent-r1-a1"/);
+  assert.match(h.node('#main').innerHTML, /data-action="close-run"/);
+  assert.deepEqual(h.requests, ['/api/runs/alpha']);
+  await h.click({action: 'close-run'});
+  assert.equal(h.run('state.runOpen'), false);
+  assert.equal(h.run('location.hash'), '#runs');
+  assert.equal(h.run('state.runQuery'), 'Альфа');
+  assert.equal(h.run('state.runCase'), 'owner');
+  assert.equal(h.run('state.runStatus'), 'completed');
+  assert.equal(h.run('state.runEffort'), 'medium');
+  assert.equal(h.run('state.runFilter'), 'missed');
+  assert.deepEqual(runIds(h.node('#main').innerHTML), ['alpha']);
+  assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY/);
+});
+
+test('attempt details start closed and each action expands only its selected attempt', async () => {
+  const h = harness();
+  const rows = [attempt(), attempt({id: 'second', attempt: 2, source: 'SECOND_SOURCE',
+    reviewer: {verdict: 'BLOCK', reason: 'SECOND_REASON'}, success: false})];
+  const data = prepareRun(h, rows);
+  h.run('renderRuns()');
+  assert.equal(h.run('state.attemptOpen'), false);
+  assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY|SECOND_SOURCE|SAVED_REVIEWER_REASON|SECOND_REASON|aria-expanded="true"/);
+  await h.click({attempt: rows[0].id, openTab: 'source'});
+  assert.equal(h.run('state.attemptOpen'), true);
+  assert.match(h.node('#attempt-records').innerHTML, /CANDIDATE_ONLY/);
+  assert.doesNotMatch(h.node('#attempt-records').innerHTML, /SECOND_SOURCE|SECOND_REASON/);
+  await h.click({attempt: rows[0].id, openTab: 'tests'});
+  assert.equal(h.run('state.attemptOpen'), true, 'Switching tabs should keep the selected attempt expanded');
+  assert.match(h.node('#attempt-records').innerHTML, /× Нарушение/);
+  await h.click({attempt: rows[1].id, openTab: 'reviewer'});
+  assert.equal(h.run('state.attempt'), 'second');
+  const answer = h.node('#attempt-records').innerHTML;
+  assert.match(answer, /SECOND_REASON|Дословный ответ модели/);
+  assert.doesNotMatch(answer, /SAVED_REVIEWER_REASON|CANDIDATE_ONLY|SECOND_SOURCE/);
+  assert.equal((answer.match(/aria-expanded="true"/g) || []).length, 1);
+  await h.click({attempt: rows[1].id, openTab: 'reviewer'});
+  assert.equal(h.run('state.attemptOpen'), false);
+  assert.doesNotMatch(h.node('#attempt-records').innerHTML, /SECOND_REASON|aria-expanded="true"/);
+  assert.deepEqual(h.requests, []);
+  assert.equal(data.rows.length, 2);
+});
+
+test('attempt filters distinguish controls, misses, false blocks and infrastructure errors', async () => {
+  const h = harness();
+  const safeOracle = {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []};
+  const rows = [
+    attempt({id: 'safe-accepted', stage: 'control', control: 'safe', success: false, oracle: safeOracle}),
+    attempt({id: 'safe-blocked', stage: 'control', control: 'safe', success: false, oracle: safeOracle, reviewer: {verdict: 'BLOCK'}}),
+    attempt({id: 'seed-blocked', stage: 'control', control: 'seed', success: false, reviewer: {verdict: 'BLOCK'}}),
+    attempt({id: 'search-missed', mode: 'feedback'}),
+    attempt({id: 'invalid', outcome: 'invalid_candidate', success: false, reviewer: {verdict: 'NOT_CALLED'}, oracle: {status: 'invalid', rows: []}}),
+    attempt({id: 'infra', outcome: 'infrastructure_error', success: false, reviewer: {verdict: 'ERROR'}, oracle: undefined}),
+    attempt({id: 'pending', outcome: 'running', success: false, reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}),
+  ];
+  const data = prepareRun(h, rows);
+  data.cases = [{id: 'owner', title: 'Историческое правило'}];
+  const ids = () => JSON.parse(h.run('JSON.stringify(visibleAttempts(data).map(row=>row.id))'));
+  for (const [filter, expected] of [
+    ['missed', ['search-missed']], ['accepted', ['safe-accepted']], ['false_block', ['safe-blocked']],
+    ['blocked', ['seed-blocked']], ['other', ['invalid', 'infra', 'pending']],
+    ['control', ['safe-accepted', 'safe-blocked', 'seed-blocked']],
+  ]) {
+    await h.emit('change', {target: {id: 'attempt-result', value: filter}});
+    assert.deepEqual(ids(), expected, filter);
+    assert.equal(h.node('#attempt-count').textContent, `${expected.length} из ${rows.length}`);
+  }
+  await h.emit('input', {target: {id: 'attempt-search', value: '  ИСТОРИЧЕСКОЕ  '}});
+  assert.deepEqual(ids(), ['safe-accepted', 'safe-blocked', 'seed-blocked']);
+  await h.emit('change', {target: {id: 'attempt-sort', value: 'newest'}});
+  assert.deepEqual(ids(), ['seed-blocked', 'safe-blocked', 'safe-accepted']);
+  await h.emit('input', {target: {id: 'attempt-search', value: 'feedback'}});
+  assert.deepEqual(ids(), [], 'Search must intersect the selected result filter');
+  assert.match(h.node('#attempt-records').innerHTML, /data-action="reset-attempt-filters"/);
+  await h.click({action: 'reset-attempt-filters'});
+  assert.deepEqual(ids(), rows.map(row => row.id));
+  assert.deepEqual(data.rows.map(row => row.id), rows.map(row => row.id), 'Sorting must not change recorded execution order');
+});
+
+test('collapsed attempt summaries preserve timestamps, historical rules and non-verdict states', () => {
+  const h = harness();
+  const data = prepareRun(h, [
+    attempt({id: 'false-block', control: 'safe', stage: 'control', success: false,
+      reviewer: {verdict: 'BLOCK'}, oracle: {status: 'evaluated', correct: true},
+      started_at: '2026-10-19T23:30:00Z'}),
+    attempt({id: 'invalid', outcome: 'invalid_candidate', success: false,
+      reviewer: {verdict: 'NOT_CALLED'}, oracle: {status: 'invalid', rows: []}}),
+    attempt({id: 'infra', outcome: 'infrastructure_error', success: false,
+      reviewer: {verdict: 'ERROR'}, source: undefined, oracle: undefined}),
+  ]);
+  data.cases = [{id: 'owner', title: '<Historical rule>', original: 'ARCHIVED_ORIGINAL'}];
+  const cards = h.run('attemptRecords(data)');
+  assert.match(cards, /Ложная блокировка/);
+  assert.match(cards, /Кандидат невалиден/);
+  assert.match(cards, /Ошибка вызова/);
+  assert.match(cards, /Начало: 20[^]*02:30[^]*МСК/);
+  assert.match(cards, /&lt;Historical rule&gt;/);
+  assert.doesNotMatch(cards, /Дефект обнаружен|Обход подтверждён|<Historical rule>|undefined|SAVED_REVIEWER_REASON/);
+  assert.equal((cards.match(/Начало:/g) || []).length, 1, 'Missing timestamps must not be fabricated');
+  assert.doesNotMatch(cards, /data-trace=/, 'Missing call references must not be guessed');
+});
+
+test('detail polling preserves chosen expansion and filters when another attempt arrives', async () => {
+  const row = attempt();
+  const next = {...detail, manifest: {...detail.manifest, status: 'running', cases: ['owner']},
+    rows: [row, attempt({id: 'later', source: 'LATER_SOURCE', attempt: 2})], calls: []};
+  const dataState = {runs: [], cases: detail.cases, active: {id: next.id, running: false}};
+  const h = harness({respond: path => path === '/api/state' ? dataState : next});
+  prepareRun(h, [row], {status: 'running'});
+  h.run('state.attemptQuery="owner";state.attempt=row.id;state.attemptOpen=true;state.inspectorTab="source";renderRuns()', {row});
+  const search = h.node('#attempt-search');
+  search.id = 'attempt-search'; search.selectionStart = 3;
+  h.run('document.activeElement=search', {search});
+  await h.run('pollOnce()');
+  assert.deepEqual(h.requests, ['/api/state', '/api/runs/run-one']);
+  assert.equal(h.run('state.attempt'), row.id);
+  assert.equal(h.run('state.attemptOpen'), true);
+  assert.equal(h.run('state.attemptQuery'), 'owner');
+  assert.match(h.node('#main').innerHTML, /CANDIDATE_ONLY/);
+  assert.doesNotMatch(h.node('#main').innerHTML, /LATER_SOURCE/);
+  assert.equal(search.focused, true);
+  assert.equal(search.selectionStart, 3);
+});
+
+test('a delayed detail response cannot reopen a run after returning to the list', async () => {
+  let resolveDetail;
+  const response = new Promise(resolve => { resolveDetail = resolve; });
+  const record = runRecord('alpha', 'Альфа');
+  const h = harness({respond: () => response});
+  h.run('state.data.runs=[record]', {record});
+  const opening = h.click({run: 'alpha'});
+  assert.equal(h.run('state.runOpen'), true);
+  await h.click({action: 'close-run'});
+  resolveDetail({id: record.id, manifest: record.manifest, rows: [attempt()], cases: detail.cases, calls: []});
+  await opening;
+  assert.equal(h.run('state.runOpen'), false);
+  assert.deepEqual(runIds(h.node('#main').innerHTML), ['alpha']);
+  assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY/);
+});
+
+test('list polling refreshes rows while preserving focus and without fetching a selected detail', async () => {
+  const initial = runRecord('one', 'Первый');
+  const added = runRecord('two', 'Второй');
+  const nextState = {runs: [initial, added], cases: detail.cases, active: {running: false}};
+  const h = harness({respond: path => {
+    assert.equal(path, '/api/state');
+    return nextState;
+  }});
+  h.run('state.data.runs=[initial];state.run=initial.id;renderRuns()', {initial});
+  const search = h.node('#run-search');
+  search.id = 'run-search';
+  search.selectionStart = 2;
+  h.run('document.activeElement=search', {search});
+  await h.run('pollOnce()');
+  assert.deepEqual(h.requests, ['/api/state']);
+  assert.equal(h.run('state.runOpen'), false);
+  assert.deepEqual(runIds(h.node('#main').innerHTML), ['one', 'two']);
+  assert.equal(search.focused, true);
+  assert.equal(search.selectionStart, 2);
+  assert.equal(h.node('#run-count').textContent, 2);
+});
+
+test('route parsing welcomes new visitors and handles malformed deep links', () => {
+  const {run} = harness();
+  assert.equal(run('currentRoute().view'), 'demo');
+  for (const hash of ['#unknown', '#runs/%ZZ']) {
+    run('location.hash=hash', {hash});
+    assert.equal(run('currentRoute().view'), 'runs');
+    assert.equal(run('currentRoute().runId'), null);
+  }
+  run('location.hash="#runs/alpha-one"');
+  assert.equal(run('currentRoute().runId'), 'alpha-one');
+});
+
+test('run counters sum recorded attempts across modes and tolerate absent summaries', () => {
+  const {run} = harness();
+  const record = runRecord('two-modes', 'Comparison', {attempts: 4, misses: 1});
+  record.summary.modes.feedback = {attempts_recorded: 3, successful_attempts: 2};
+  assert.equal(run('runCounts(record).attempts', {record}), 7);
+  assert.equal(run('runCounts(record).misses'), 3);
+  assert.equal(run('runCounts({}).attempts'), 0);
+});
+
+test('replications expose one selected trial and do not turn errors into detected defects', () => {
+  const {run} = harness();
+  const selectedId = 'replication-collision-medium-2026-10-19';
+  const rows = [attempt({id: 'missed'}),
+    attempt({id: 'blocked', success: false, reviewer: {verdict: 'BLOCK'}}),
+    attempt({id: 'error', success: false, outcome: 'infrastructure_error', reviewer: {verdict: 'NOT_CALLED'}})];
+  run('state.details.set(selectedId,{manifest:{models:{reviewer:["gpt-test","medium"]}},rows});state.demoRun=selectedId;state.demoAttempt="blocked"', {selectedId, rows});
+  const markup = run('replications()');
+  const buttons = [...markup.matchAll(/<button[^]*?<\/button>/g)].map(match => match[0]);
+  assert.equal(buttons.filter(button => button.includes('aria-pressed="true"')).length, 1);
+  assert.match(buttons.find(button => button.includes('data-demo-attempt="blocked"')), /class="trial [^"]*selected"[^]*>✓<\/button>/);
+  assert.match(buttons.find(button => button.includes('data-demo-attempt="error"')), /нет решения[^]*>·<\/button>/);
+  assert.match(buttons.find(button => button.includes('data-demo-attempt="missed"')), />×<\/button>/);
+});
+
+test('launch presets enforce their allowed fields and display bounded call budgets', () => {
+  const h = harness();
+  const {run, node} = h;
+  const elements = launchFields(h);
+  for (const [preset, calls, attempts, repeats] of [['screen', 5, '1', '3'], ['feedback', 6, '2', '1'], ['compare', 18, '4', '1']]) {
+    elements.preset.value = preset;
+    elements.case.value = 'audit';
+    run('updateForm("preset")');
+    assert.equal(node('#call-budget').textContent, calls);
+    assert.equal(elements.attempts.value, attempts);
+    assert.equal(elements.repeats.value, repeats);
+    assert.equal(elements.case.disabled, preset === 'screen');
+    assert.equal(elements.attempts.disabled, preset !== 'feedback');
+    if (preset === 'screen') assert.equal(elements.case.value, 'owner');
+  }
+  elements.preset.value = 'feedback';
+  elements.attempts.value = '3';
+  elements.repeats.value = '2';
+  run('state.data.active.running=true;updateForm()');
+  assert.equal(node('#call-budget').textContent, 14);
+  assert.equal(elements.attempts.value, '3');
+  assert.equal(elements.repeats.value, '2');
+  assert.equal(node('#start-button').disabled, true);
+});
+
+test('launch plans calculate both modes and repeats while describing conditional reviewer output', () => {
+  const {run} = harness();
+  for (const effort of ['low', 'medium']) {
+    for (const repeats of [1, 2, 3]) {
+      for (const [preset, attempts, modes, callsPerAttempt] of [
+        ['screen', 1, 1, 1], ['feedback', 1, 1, 2], ['feedback', 3, 1, 2], ['compare', 4, 2, 2],
+      ]) {
+        const plan = run('launchPlan(preset,attempts,repeats,effort,"owner")', {preset, attempts, repeats, effort});
+        const candidates = attempts * repeats * modes;
+        assert.equal(plan.checks, candidates);
+        assert.equal(plan.max, 2 + candidates * callsPerAttempt);
+        assert.match(plan.steps[2].join(' '), /Luna 5.6/);
+        assert.match(plan.steps[2].join(' '), new RegExp(`\\(${effort}\\)`));
+        assert.match(plan.steps[0].join(' '), /2|двух/);
+        assert.match(plan.steps[0].join(' '), /безопасно[^]*очевидн/);
+        if (preset === 'screen') {
+          assert.match(plan.steps[1][1], /Один[^]*код[^]*новых сессиях/);
+          assert.match(plan.steps[1][1] + plan.budget, /Sol не участвует|Sol не вызывается|Sol не запускается/);
+          assert.match(plan.result, new RegExp(`^До ${repeats} (?:нового ответа|новых ответов) Luna`), 'A partial or interrupted launch must not promise all responses');
+        } else {
+          assert.match(plan.result, new RegExp(`До ${candidates} (?:записей|кандидатов)`));
+          assert.match(plan.result, /допущенных к ревью|если кандидат дошёл до ревью/);
+          assert.match(plan.budget, /Невалидные кандидаты не отправляются|Неподходящие кандидаты пропускают ревью/);
+        }
+        if (preset === 'compare') assert.match(plan.steps[1][1], /независим[^]*|без обратной связи/);
+      }
+    }
+  }
+});
+
+test('launch preview uses the actual saved patch or the selected original code without starting a run', async () => {
+  const h = harness();
+  const fields = launchFields(h);
+  h.run('state.data.launch_candidate="SAVED_PATCH <tag>";state.data.cases.push({id:"audit",title:"Audit",original:"AUDIT_ORIGINAL"})');
+  h.run('renderLaunch()');
+  assert.match(h.node('#main').innerHTML, /type="submit" form="launch-form"/);
+  assert.match(h.node('#launch-source-code').innerHTML, /SAVED_PATCH &lt;tag&gt;/);
+  assert.doesNotMatch(h.node('#launch-source-code').innerHTML, /ORIGINAL_ONLY/);
+  assert.equal(h.node('#start-button').textContent, 'Запустить проверку');
+  fields.preset.value = 'feedback';
+  await h.emit('change', {target: {id: 'preset', name: 'preset', closest: () => h.node('#launch-form')}});
+  fields.case.value = 'audit';
+  fields.effort.value = 'low';
+  fields.attempts.value = '3';
+  fields.repeats.value = '2';
+  await h.emit('change', {target: {id: 'case', name: 'case', closest: () => h.node('#launch-form')}});
+  assert.equal(h.node('#call-budget').textContent, 14);
+  assert.equal(h.node('#start-button').textContent, 'Начать поиск обхода');
+  assert.match(h.node('#launch-source-code').innerHTML, /AUDIT_ORIGINAL/);
+  assert.doesNotMatch(h.node('#launch-source-code').innerHTML, /SAVED_PATCH|ORIGINAL_ONLY/);
+  assert.match(h.node('#launch-plan').innerHTML, /Luna 5.6[^]*\(low\)/);
+  assert.match(h.node('#launch-plan').innerHTML, /До 6 (?:записей|кандидатов)/);
+  assert.deepEqual(h.requests, [], 'Choosing a preset, rule, or effort must only update the preview');
+});
+
+test('only explicit form submission sends its selected config to the in-memory start endpoint', async () => {
+  let submitted;
+  const nextState = {runs: [], cases: detail.cases, active: {id: 'synthetic-run', running: true}};
+  const h = harness({allowPost: true, respond: (path, options) => {
+    if (path === '/api/start') {
+      assert.equal(options.method, 'POST');
+      submitted = JSON.parse(options.body);
+      return {id: 'synthetic-run'};
+    }
+    assert.equal(path, '/api/state');
+    assert.equal(options.method || 'GET', 'GET');
+    return nextState;
+  }});
+  launchFields(h, {preset: 'feedback', case: 'owner', attempts: '3', repeats: '2', effort: 'low'});
+  h.run('state.view="launch";toast=()=>{};renderLaunch()');
+  assert.equal(submitted, undefined);
+  const form = h.node('#launch-form');
+  form.id = 'launch-form';
+  let prevented = false;
+  await h.emit('submit', {target: form, preventDefault() { prevented = true; }});
+  assert.equal(prevented, true);
+  assert.deepEqual(submitted, {preset: 'feedback', case: 'owner', effort: 'low', attempts: 3, repeats: 2});
+  assert.deepEqual(h.requests, ['/api/start', '/api/state']);
+  assert.equal(h.run('state.run'), 'synthetic-run');
+  assert.equal(h.run('state.runOpen'), true);
+  assert.equal(h.run('location.hash'), '#runs/synthetic-run');
+  assert.match(h.node('#main').innerHTML, /Подготовка запуска|Готовим данные/);
+});
+
+test('a pending start request cannot be submitted twice or reenabled by changing the preview', async () => {
+  let finishStart;
+  const pending = new Promise(resolve => { finishStart = resolve; });
+  const h = harness({allowPost: true, respond: path => {
+    if (path === '/api/start') return pending;
+    assert.equal(path, '/api/state');
+    return {runs: [], cases: detail.cases, active: {id: 'synthetic-run', running: true}};
+  }});
+  launchFields(h);
+  h.run('state.view="launch";toast=()=>{};renderLaunch()');
+  const form = h.node('#launch-form');
+  form.id = 'launch-form';
+  const event = {target: form, preventDefault() {}};
+  const firstSubmission = h.emit('submit', event);
+  assert.equal(h.run('state.launchPending'), true);
+  assert.equal(h.node('#start-button').disabled, true);
+  assert.match(h.node('#start-button').textContent, /Запускаем/);
+  h.run('updateForm()');
+  assert.equal(h.node('#start-button').disabled, true);
+  await h.emit('submit', event);
+  assert.deepEqual(h.requests, ['/api/start']);
+  finishStart({id: 'synthetic-run'});
+  await firstSubmission;
+  assert.equal(h.run('state.launchPending'), false);
+  assert.equal(h.run('state.run'), 'synthetic-run');
+  assert.deepEqual(h.requests, ['/api/start', '/api/state']);
+});
+
+test('a failed start restores the selected configuration and escapes the diagnostic', async () => {
+  const h = harness({allowPost: true, respond: path => {
+    assert.equal(path, '/api/start');
+    throw new Error('<Start rejected> & retry');
+  }});
+  const fields = launchFields(h, {preset: 'compare', case: 'owner', attempts: '4', repeats: '2', effort: 'low'});
+  h.run('state.view="launch";renderLaunch()');
+  const form = h.node('#launch-form');
+  form.id = 'launch-form';
+  await h.emit('submit', {target: form, preventDefault() {}});
+  assert.equal(h.run('state.launchPending'), false);
+  assert.equal(h.run('state.run'), null);
+  assert.equal(h.run('state.view'), 'launch');
+  assert.equal(h.node('#start-button').disabled, false);
+  assert.equal(fields.preset.value, 'compare');
+  assert.equal(fields.repeats.value, '2');
+  assert.equal(fields.effort.value, 'low');
+  assert.equal(h.node('#call-budget').textContent, 34);
+  assert.match(h.node('#launch-error').innerHTML, /&lt;Start rejected&gt; &amp; retry/);
+  assert.doesNotMatch(h.node('#launch-error').innerHTML, /<Start rejected>/);
+  assert.deepEqual(h.requests, ['/api/start']);
+});
+
+test('active run phases use started calls and factual counts without inventing progress percentages', () => {
+  const h = harness();
+  h.run('state.run="live";state.runOpen=true;state.data.active={id:"live",running:true,stop_requested:false}');
+  const preparing = h.run('liveBanner()');
+  assert.match(preparing, /Подготовка запуска/);
+  assert.doesNotMatch(preparing, /\d+\s*%|Попытки завершены|data-trace=/);
+  const data = {
+    id: 'live',
+    manifest: {attempts_per_run: 4, repeats: 2, modes: ['independent', 'feedback'], cases: ['owner']},
+    rows: [
+      attempt({id: 'safe', stage: 'control', control: 'safe', success: false}),
+      attempt({id: 'seed', stage: 'control', control: 'seed', success: false}),
+      attempt({id: 'invalid', success: false, outcome: 'invalid_candidate', reviewer: {verdict: 'NOT_CALLED'}}),
+      attempt({id: 'pending', success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}}),
+    ],
+    calls: [
+      {id: 'safe-call', role: 'reviewer', status: 'completed'},
+      {id: 'seed-call', role: 'reviewer', status: 'completed'},
+      {id: 'generating', role: 'attacker', status: 'started'},
+    ],
+  };
+  h.run('state.details.set(data.id,data)', {data});
+  const generating = h.run('liveBanner()');
+  assert.match(generating, /Sol создаёт/);
+  assert.match(generating, /Попытки завершены: 1 из 16/);
+  assert.match(generating, /Контроли: 2 из 2/);
+  assert.match(generating, /Вызовы моделей: 3/);
+  assert.match(generating, /data-trace="generating"/);
+  assert.doesNotMatch(generating, /\d+\s*%/);
+  data.calls[2].status = 'completed';
+  data.calls.push({id: 'reviewing', role: 'reviewer', status: 'started'});
+  const reviewing = h.run('liveBanner()');
+  assert.match(reviewing, /Luna проверяет/);
+  assert.match(reviewing, /data-trace="reviewing"/);
+  assert.doesNotMatch(reviewing, /Не вызван|не вызван/);
+  data.calls[3].status = 'error';
+  data.calls[3].last_event = 'turn.completed';
+  const afterError = h.run('liveBanner()');
+  assert.doesNotMatch(afterError, /Luna проверяет|data-trace="reviewing"|Завершён/);
+});
+
+test('stopping remains a running state and other views link to the active run', () => {
+  const h = harness();
+  h.run('state.data.active={id:"live",running:true,stop_requested:false};state.run="another";state.runOpen=true');
+  const other = h.run('liveBanner()');
+  assert.match(other, /data-run="live"/);
+  assert.doesNotMatch(other, /Подготовка запуска|Попытки завершены/);
+  h.run('state.run="live";state.data.active.stop_requested=true');
+  const stopping = h.run('liveBanner()');
+  assert.match(stopping, /Ожидаем завершения процесса/);
+  assert.match(stopping, /data-action="stop" disabled/);
+  assert.doesNotMatch(stopping, /Эксперимент завершён|Эксперимент остановлен/);
+  h.run('state.data.active.running=false');
+  assert.equal(h.run('liveBanner()'), '');
+});
+
+test('pending attempt summaries do not treat NOT_CALLED as proof no reviewer is running', () => {
+  const h = harness();
+  const row = attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}});
+  const data = prepareRun(h, [row], {status: 'running'});
+  data.calls.push({id: 'in-flight-review', role: 'reviewer', status: 'started'});
+  const content = h.run('attemptRecords(data)');
+  assert.match(content, /В работе/);
+  assert.doesNotMatch(content, /Не вызван|Ревьюер не вызван|Обход подтверждён/);
+  h.run('state.attempt=row.id;state.attemptOpen=true;state.inspectorTab="reviewer"', {row});
+  assert.doesNotMatch(h.run('attemptRecords(data)'), /Не вызван|Ревьюер не вызван|Дословный ответ модели/);
+  h.run('state.inspectorTab="source"');
+  assert.doesNotMatch(h.run('attemptRecords(data)'), /Не вызван|Ревьюер не вызван|Дословный ответ модели/);
+});
+
+function prepareManual(h, rows = [], {source = 'DRAFT_ONLY', selected = null, status = 'completed'} = {}) {
+  const data = {
+    id: 'manual-one',
+    manifest: {experiment_kind: 'manual', status, cases: ['owner'],
+      models: {reviewer: ['gpt-test', 'medium']}},
+    cases: detail.cases, rows, calls: [],
+  };
+  h.run('state.details.set(data.id,data);state.view="manual";Object.assign(state.manual,{caseId:"owner",source:draft,runId:data.id,loadedRun:data.id,selected,pending:false,error:""})',
+    {data, draft: source, selected});
+  return data;
+}
+
+function manualAttempt(overrides = {}) {
+  return attempt({id: 'owner-manual-r1-a1', mode: 'manual', ...overrides});
+}
+
+test('manual editing starts from the selected original with no model or network activity', () => {
+  const h = harness();
+  h.run('state.view="manual";renderManual()');
+  assert.equal(h.run('state.manual.caseId'), 'owner');
+  assert.equal(h.run('state.manual.source'), 'ORIGINAL_ONLY');
+  assert.equal(h.run('state.manual.runId'), null);
+  const page = h.node('#main').innerHTML;
+  assert.match(page, /id="manual-form"/);
+  assert.match(page, /id="manual-source"/);
+  assert.equal((page.match(/id="manual-submit"/g)||[]).length,1);
+  assert.match(page, /id="manual-submit" form="manual-form" type="submit"/);
+  assert.ok(page.indexOf('id="manual-submit"')<page.indexOf('id="manual-form"'),'Primary action must be available in the header before the editor');
+  assert.doesNotMatch(page, /SAVED_REVIEWER_REASON|Обход подтверждён|Нарушение пропущено/);
+  assert.deepEqual(h.requests, []);
+});
+
+test('manual deep links are parsed without confusing them with the ordinary run inspector', () => {
+  const h = harness();
+  for (const [hash, runId] of [['#manual', null], ['#manual/manual-one', 'manual-one'], ['#manual/a%20b', 'a b']]) {
+    h.run('location.hash=hash', {hash});
+    assert.equal(h.run('currentRoute().view'), 'manual');
+    assert.equal(h.run('currentRoute().runId'), runId);
+  }
+  h.run('location.hash="#manual/%ZZ"');
+  assert.equal(h.run('currentRoute().runId'), null);
+});
+
+test('manual findings separate invalid code, a fixed defect, another regression and the targeted defect', () => {
+  const h = harness();
+  const cases = [
+    [manualAttempt({success: false, outcome: 'local_invalid', reviewer: {verdict: 'NOT_CALLED'},
+      oracle: {status: 'invalid', reason: 'unsupported source', rows: []}}), /Код|код/, /провер|выполн|разобр/],
+    [manualAttempt({success: false, outcome: 'rule_preserved', reviewer: {verdict: 'NOT_CALLED'},
+      oracle: {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []}}), /исправ|соблюд|нарушени.*нет|безопас/i, /не отправ|не выз|не нужен|не требуется|ревью/i],
+    [manualAttempt({success: false, outcome: 'different_regression', reviewer: {verdict: 'NOT_CALLED'},
+      oracle: {status: 'evaluated', correct: false, target_regression: false, rows: [], witnesses: []}}), /друг|дополн|целев|поведени/i, /не отправ|не выз|ревью/i],
+    [manualAttempt(), /пропущ|пропуст|обход/i, /PASS/],
+    [manualAttempt({success: false, reviewer: {verdict: 'BLOCK', reason: 'caught'}}), /замет|обнаруж|отклон|наш/i, /BLOCK/],
+  ];
+  const titles = [];
+  for (const [row, title, content] of cases) {
+    const finding = h.run('manualFinding(row)', {row});
+    titles.push(finding.title);
+    assert.match(finding.title, title);
+    assert.match(JSON.stringify(finding), content);
+  }
+  assert.equal(new Set(titles).size, cases.length, 'Every diagnosis needs its own understandable outcome');
+});
+
+test('pending or failed manual checks never invent a reviewer decision', () => {
+  const h = harness();
+  for (const row of [
+    manualAttempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}),
+    manualAttempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}}),
+    manualAttempt({success: false, outcome: 'infrastructure_error', reviewer: {verdict: 'ERROR'}}),
+  ]) {
+    const finding = h.run('manualFinding(row)', {row});
+    assert.doesNotMatch(finding.title, /пропущ|пропуст|обход|отклон|модель замет/i);
+    assert.doesNotMatch(finding.reviewer, /\bPASS\b|\bBLOCK\b/);
+    assert.match(JSON.stringify(finding), /ожида|провер|выполня|ошиб|получ|работ/i);
+  }
+});
+
+test('manual result and draft safely escape code and reviewer text', () => {
+  const h = harness();
+  const malicious = '</textarea><script>alert("source")</script>&';
+  const row = manualAttempt({source: malicious, reviewer: {verdict: 'PASS', reason: '<img src=x onerror="answer()"> & saved'}});
+  const data = prepareManual(h, [row], {source: malicious});
+  h.run('renderManual()');
+  const page = h.node('#main').innerHTML;
+  assert.match(page, /&lt;\/textarea&gt;&lt;script&gt;/);
+  assert.doesNotMatch(page, /<script>|<img src=x/);
+  const result = h.run('manualResultMarkup(data,row)', {data, row});
+  assert.match(result, /&lt;img src=x/);
+  assert.doesNotMatch(result, /<img src=x|<script>/);
+});
+
+test('manual draft input and ordinary navigation preserve the submitted evidence', async () => {
+  const h = harness();
+  const row = manualAttempt();
+  prepareManual(h, [row], {source: row.source});
+  h.run('renderManual()');
+  await h.emit('input', {target: {id: 'manual-source', value: 'EDITED_DRAFT'}});
+  assert.equal(h.run('state.manual.source'), 'EDITED_DRAFT');
+  assert.equal(h.run('state.details.get("manual-one").rows[0].source'), 'CANDIDATE_ONLY');
+  assert.match(h.node('#manual-draft-note').textContent + h.node('#manual-draft-note').innerHTML, /измен|попыт|верси|черновик|провер/i);
+  h.run('navigate("runs");navigate("manual")');
+  assert.equal(h.run('state.manual.source'), 'EDITED_DRAFT');
+  assert.equal(h.run('state.manual.runId'), 'manual-one');
+  assert.match(h.node('#main').innerHTML, /EDITED_DRAFT/);
+  assert.deepEqual(h.requests, []);
+});
+
+test('selecting a saved manual result keeps the current draft until explicit edit', async () => {
+  const h = harness();
+  const first = manualAttempt();
+  const second = manualAttempt({id: 'owner-manual-r1-a2', attempt: 2, source: 'SECOND_SAVED_SOURCE',
+    success: false, reviewer: {verdict: 'BLOCK', reason: 'SECOND_REASON'}});
+  prepareManual(h, [first, second], {source: 'UNSENT_DRAFT'});
+  h.run('renderManual();selectManualAttempt(first.id)', {first});
+  assert.equal(h.run('state.manual.selected'), first.id);
+  assert.equal(h.run('state.manual.source'), 'UNSENT_DRAFT');
+  await h.click({action: 'manual-edit'});
+  assert.equal(h.run('state.manual.source'), first.source);
+  assert.equal(h.run('state.details.get("manual-one").rows[1].source'), second.source);
+  assert.deepEqual(h.requests, []);
+});
+
+test('manual submission posts only the current patch and series, without starting an attacker', async () => {
+  let submitted;
+  const draft = 'def decision(role, approved):\n    return role == "editor" and approved\n';
+  const row = manualAttempt({source: draft});
+  const saved = {id: 'manual-created', manifest: {experiment_kind: 'manual', status: 'running', cases: ['owner']},
+    cases: detail.cases, rows: [row], calls: []};
+  const h = harness({allowPost: true, respond: (path, options) => {
+    if (path === '/api/manual') {submitted = JSON.parse(options.body); return {id: saved.id};}
+    if (path === '/api/state') return {runs: [], cases: detail.cases, active: {id: saved.id, running: true}};
+    assert.equal(path, '/api/runs/' + saved.id);
+    return saved;
+  }});
+  h.run('state.view="manual";state.manual.source=draft;toast=()=>{};renderManual()', {draft});
+  assert.equal(submitted, undefined);
+  const form = h.node('#manual-form');
+  form.id = 'manual-form';
+  let prevented = false;
+  await h.emit('submit', {target: form, preventDefault() { prevented = true; }});
+  assert.equal(prevented, true);
+  assert.deepEqual(submitted, {case: 'owner', source: draft, run_id: null});
+  assert.equal(h.run('state.manual.runId'), saved.id);
+  assert.equal(h.run('state.manual.source'), draft);
+  assert.equal(h.run('state.view'), 'manual');
+  assert.equal(h.run('location.hash'), '#manual/' + saved.id);
+  assert.equal(h.requests.filter(path => path === '/api/manual').length, 1);
+  assert.ok(h.requests.every(path => path === '/api/manual' || path === '/api/state' || path === '/api/runs/' + saved.id));
+});
+
+test('a pending manual submit cannot duplicate the request or replace a newer draft', async () => {
+  let finish;
+  const posting = new Promise(resolve => {finish = resolve;});
+  const submitted = [];
+  const saved = {id: 'manual-one', manifest: {experiment_kind: 'manual', status: 'running', cases: ['owner']},
+    cases: detail.cases, rows: [], calls: []};
+  const h = harness({allowPost: true, respond: (path, options) => {
+    if (path === '/api/manual') {submitted.push(JSON.parse(options.body)); return posting;}
+    if (path === '/api/state') return {runs: [], cases: detail.cases, active: {id: saved.id, running: true}};
+    assert.equal(path, '/api/runs/' + saved.id);
+    return saved;
+  }});
+  prepareManual(h, [], {source: 'SUBMITTED_PATCH'});
+  h.run('toast=()=>{};renderManual()');
+  const pending = h.run('submitManual()');
+  assert.equal(h.run('state.manual.pending'), true);
+  assert.equal(h.node('#manual-submit').disabled, true);
+  await h.emit('input', {target: {id: 'manual-source', value: 'NEXT_UNSUBMITTED_DRAFT'}});
+  await h.run('submitManual()');
+  assert.equal(submitted.length, 1);
+  finish({id: saved.id});
+  await pending;
+  assert.deepEqual(submitted[0], {case: 'owner', source: 'SUBMITTED_PATCH', run_id: saved.id});
+  assert.equal(h.run('state.manual.pending'), false);
+  assert.equal(h.run('state.manual.source'), 'NEXT_UNSUBMITTED_DRAFT');
+});
+
+test('a rejected manual request retains draft, selected evidence, and a retryable escaped error', async () => {
+  const h = harness({allowPost: true, respond: path => {
+    assert.equal(path, '/api/manual');
+    throw new Error('<retry> & connection failed');
+  }});
+  const row = manualAttempt();
+  prepareManual(h, [row], {source: 'UNSENT_DRAFT', selected: row.id});
+  h.run('renderManual()');
+  await h.run('submitManual()');
+  assert.equal(h.run('state.manual.pending'), false);
+  assert.equal(h.run('state.manual.source'), 'UNSENT_DRAFT');
+  assert.equal(h.run('state.manual.runId'), 'manual-one');
+  assert.equal(h.run('state.manual.selected'), row.id);
+  assert.equal(h.node('#manual-submit').disabled, false);
+  assert.match(h.node('#manual-error').innerHTML, /&lt;retry&gt; &amp; connection failed/);
+  assert.doesNotMatch(h.node('#manual-error').innerHTML, /<retry>/);
+  assert.deepEqual(h.requests, ['/api/manual']);
+});
+
+test('manual polling updates evidence without recreating the editor or overwriting its draft', async () => {
+  const first = manualAttempt();
+  const second = manualAttempt({id: 'owner-manual-r1-a2', attempt: 2, source: 'NEW_SAVED_SOURCE',
+    success: false, reviewer: {verdict: 'BLOCK', reason: 'NEW_SAVED_REASON'}});
+  const saved = {id: 'manual-one', manifest: {experiment_kind: 'manual', status: 'completed', cases: ['owner']},
+    cases: detail.cases, rows: [first, second], calls: []};
+  const h = harness({respond: path => {
+    if (path === '/api/state') return {runs: [], cases: detail.cases, active: {id: saved.id, running: false}};
+    assert.equal(path, '/api/runs/' + saved.id);
+    return saved;
+  }});
+  prepareManual(h, [first], {source: 'UNSENT_DRAFT', selected: first.id, status: 'running'});
+  h.run('renderManual()');
+  const editor = h.node('#manual-source');
+  editor.value = 'UNSENT_DRAFT'; editor.selectionStart = 6; editor.selectionEnd = 6;
+  h.run('document.activeElement=editor', {editor});
+  const before = h.node('#main').innerHTML;
+  await h.run('pollOnce()');
+  assert.equal(h.run('state.manual.source'), 'UNSENT_DRAFT');
+  assert.equal(h.run('state.manual.selected'), first.id);
+  assert.equal(h.run('state.details.get("manual-one").rows.length'), 2);
+  assert.equal(h.node('#main').innerHTML, before, 'Polling must replace only result/history, leaving the editor DOM intact');
+  assert.equal(editor.value, 'UNSENT_DRAFT');
+  assert.equal(editor.selectionStart, 6);
+  assert.match(h.node('#manual-result').innerHTML, /SAVED_REVIEWER_REASON/);
+  assert.doesNotMatch(h.node('#manual-result').innerHTML, /NEW_SAVED_REASON/);
+  assert.deepEqual(h.requests, ['/api/state', '/api/runs/manual-one']);
+});
+
+test('manual history contains user attempts while controls remain in the detailed result', () => {
+  const h = harness();
+  const controls = [
+    manualAttempt({id: 'safe-control', stage: 'control', control: 'safe', attempt: 0, success: false,
+      oracle: {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []}}),
+    manualAttempt({id: 'seed-control', stage: 'control', control: 'seed', attempt: 0, success: false,
+      reviewer: {verdict: 'BLOCK', reason: 'CONTROL_REASON'}}),
+  ];
+  const row = manualAttempt();
+  const data = prepareManual(h, [...controls, row]);
+  const history = h.run('manualHistory(data)', {data});
+  assert.match(history, new RegExp(row.id));
+  assert.doesNotMatch(history, /safe-control|seed-control|Безопасный контроль|Очевидный дефект|CONTROL_REASON/);
+  const result = h.run('manualResultMarkup(data,row)', {data, row});
+  assert.match(result, /Контрол|контрол/);
+});
+
+test('opening an uncached manual series loads its own case and latest submitted code', async () => {
+  const saved = {id: 'manual-audit', manifest: {experiment_kind: 'manual', status: 'completed', cases: ['audit']},
+    cases: [{id: 'audit', title: 'Audit', original: 'AUDIT_ORIGINAL'}],
+    rows: [manualAttempt({case: 'audit', source: 'SAVED_AUDIT_PATCH'})], calls: []};
+  const record = runRecord(saved.id, 'Ручная серия', {caseId: 'audit'});
+  record.manifest.experiment_kind = 'manual';
+  const h = harness({respond: path => {assert.equal(path, '/api/runs/' + saved.id); return saved;}});
+  h.run('state.data.runs=[record];state.data.cases.push({id:"audit",title:"Audit",original:"AUDIT_ORIGINAL"})', {record});
+  await h.click({run: saved.id});
+  assert.equal(h.run('state.view'), 'manual');
+  assert.equal(h.run('state.manual.caseId'), 'audit');
+  assert.equal(h.run('state.manual.source'), 'SAVED_AUDIT_PATCH');
+  assert.match(h.node('#main').innerHTML, /SAVED_AUDIT_PATCH/);
+  assert.doesNotMatch(h.node('#main').innerHTML, /ORIGINAL_ONLY/);
+  assert.deepEqual(h.requests, ['/api/runs/' + saved.id]);
+});
+
+test('a delayed manual submit cannot reopen its series after the user switches to another one', async () => {
+  let finish;
+  const posting = new Promise(resolve => {finish = resolve;});
+  const other = {id: 'manual-other', manifest: {experiment_kind: 'manual', status: 'completed', cases: ['owner']},
+    cases: detail.cases, rows: [manualAttempt({source: 'OTHER_SAVED_PATCH'})], calls: []};
+  const h = harness({allowPost: true, respond: path => {
+    if (path === '/api/manual') return posting;
+    if (path === '/api/state') return {runs: [], cases: detail.cases, active: {id: 'manual-one', running: true}};
+    assert.equal(path, '/api/runs/' + other.id);
+    return other;
+  }});
+  prepareManual(h, [], {source: 'SUBMITTED_PATCH'});
+  h.run('state.details.set(other.id,other);renderManual()', {other});
+  const pending = h.run('submitManual()');
+  h.run('navigate("manual",other.id)', {other});
+  await h.emit('input', {target: {id: 'manual-source', value: 'OTHER_UNSENT_DRAFT'}});
+  finish({id: 'manual-one'});
+  await pending;
+  assert.equal(h.run('state.manual.runId'), other.id);
+  assert.equal(h.run('state.manual.source'), 'OTHER_UNSENT_DRAFT');
+  assert.equal(h.run('location.hash'), '#manual/' + other.id);
+  assert.equal(h.run('state.data.active.id'), 'manual-one');
+});
+
+test('switching toy rules preserves a separate unsent draft for each rule', async () => {
+  const h = harness();
+  h.run('state.view="manual";state.data.cases.push({id:"audit",title:"Audit",original:"AUDIT_ORIGINAL"});renderManual()');
+  await h.emit('input', {target: {id: 'manual-source', value: 'OWNER_UNSENT'}});
+  await h.emit('change', {target: {id: 'manual-case', value: 'audit'}});
+  assert.equal(h.run('state.manual.source'), 'AUDIT_ORIGINAL');
+  await h.emit('input', {target: {id: 'manual-source', value: 'AUDIT_UNSENT'}});
+  await h.emit('change', {target: {id: 'manual-case', value: 'owner'}});
+  assert.equal(h.run('state.manual.source'), 'OWNER_UNSENT');
+  await h.emit('change', {target: {id: 'manual-case', value: 'audit'}});
+  assert.equal(h.run('state.manual.source'), 'AUDIT_UNSENT');
+  h.run('state.manual.caseId="owner";state.manual.source=null;restoreManualDraft()');
+  assert.equal(h.run('state.manual.caseId'), 'audit', 'Reload restores the last edited case');
+  assert.equal(h.run('state.manual.source'), 'AUDIT_UNSENT');
+  assert.deepEqual(h.requests, []);
+});
+
+test('legacy single draft is recovered without leaking it into another case', () => {
+  const h = harness();
+  h.storage.set('reviewer-lab.manual.new', JSON.stringify({caseId: 'owner', source: 'OLD_DRAFT'}));
+  h.run('state.data.cases.push({id:"audit",title:"Audit",original:"AUDIT_ORIGINAL"});restoreManualDraft()');
+  assert.equal(h.run('state.manual.source'), 'OLD_DRAFT');
+  h.run('saveManualDraft();state.manual.caseId="audit";state.manual.source=null;restoreManualDraft(null,"audit")');
+  assert.equal(h.run('state.manual.source'), null);
+  assert.equal(h.run('state.manual.caseId'), 'audit');
+  h.run('state.manual.caseId="owner";restoreManualDraft(null,"owner")');
+  assert.equal(h.run('state.manual.source'), 'OLD_DRAFT');
+});
+
+test('restoring history keeps a durable one-step undo for the unsent draft', async () => {
+  const h = harness(),row=manualAttempt();
+  prepareManual(h,[row],{source:'VALUABLE_UNSENT',selected:row.id});
+  h.run('renderManual()');
+  await h.click({action:'manual-edit'});
+  assert.equal(h.run('state.manual.source'), row.source);
+  assert.equal(h.run('state.manual.undoSource'), 'VALUABLE_UNSENT');
+  assert.equal(h.node('#manual-undo').hidden, false);
+  assert.equal(JSON.parse(h.storage.get('reviewer-lab.manual.manual-one')).undoSource,'VALUABLE_UNSENT');
+  h.run('state.manual.undoSource=null;restoreManualDraft("manual-one")');
+  await h.click({action:'manual-undo'});
+  assert.equal(h.run('state.manual.source'),'VALUABLE_UNSENT');
+  assert.equal(h.run('state.manual.undoSource'),null);
+  assert.equal(h.node('#manual-undo').hidden,true);
+  assert.equal(row.source,'CANDIDATE_ONLY','Saved evidence must remain immutable');
+});
+
+test('invalid code displays an escaped actionable diagnostic without expanding details', () => {
+  const h=harness();
+  const row=manualAttempt({outcome:'local_invalid',success:false,reviewer:{verdict:'NOT_CALLED'},
+    oracle:{status:'invalid',reason:'Unsupported syntax: Import',rows:[],diagnostic:{message:'Удалите import <script>.',line:2,column:5}}});
+  const data=prepareManual(h,[row]);
+  const html=h.run('manualResultMarkup(data,row)',{data,row});
+  assert.match(html,/Строка 2, позиция 5\. Удалите import &lt;script&gt;\./);
+  assert.ok(html.indexOf('Удалите import')<html.indexOf('<details'), 'The repair hint must be visible before any disclosure');
+  assert.doesNotMatch(html,/<script>/);
+  assert.equal(h.run('manualDiagnostic(row)',{row:{oracle:{status:'evaluated',correct:true}}}),'');
+});
+
+test('old invalid results get a readable hint without inventing a source location', () => {
+  const h=harness();
+  const html=h.run('manualDiagnostic(row)',{row:{oracle:{status:'invalid',reason:'decision must return exactly bool'}}});
+  assert.match(html,/должна возвращать True или False/);
+  assert.doesNotMatch(html,/Строка/);
+});
+
+test('unobserved and interrupted execution cannot masquerade as a running review', () => {
+  const h=harness();
+  const row=manualAttempt({outcome:'running',success:false,reviewer:{verdict:'NOT_CALLED'}});
+  const data=prepareManual(h,[row],{status:'running'});
+  data.execution_state='unobserved';
+  let html=h.run('manualResultMarkup(data,row)',{data,row});
+  assert.match(html,/Выполнение не подтверждено/);
+  assert.doesNotMatch(html,/Проверяем патч|Luna проверяет патч|data-action="stop"/);
+  assert.match(h.run('manualHistory(data)',{data}),/Выполнение не подтверждено/);
+  data.execution_state='interrupted';
+  html=h.run('manualResultMarkup(data,row)',{data,row});
+  assert.match(html,/Проверка прервана/);
+  assert.doesNotMatch(html,/Проверяем патч|data-action="stop"/);
+});
+
+test('failed reviewer call has no verdict and exposes its diagnostic trace', () => {
+  const h=harness();
+  const row=manualAttempt({success:false,outcome:'infrastructure_error',
+    reviewer:{verdict:'ERROR'},reviewer_failed_call:'003-reviewer',error:'Connection lost'});
+  const data=prepareManual(h,[row]);
+  const html=h.run('manualResultMarkup(data,row)',{data,row});
+  assert.match(html,/Ответ ревьюера не получен/);
+  assert.match(html,/data-trace="003-reviewer"/);
+  assert.doesNotMatch(html,/Не вызывался|Одобрил · PASS|Отклонил · BLOCK/);
+});
+
+test('demo manual check uses only the offline endpoint and invents no reviewer answer', async () => {
+  const oracle = attempt().oracle;
+  const h = harness({allowPost:true,respond:async(path,options)=>{
+    assert.equal(path,'/api/manual/check');
+    assert.deepEqual(JSON.parse(options.body),{case:'owner',source:'LOCAL_SOURCE'});
+    return {oracle};
+  }});
+  h.run("state.data.read_only=true;state.view='manual';state.manual.source='LOCAL_SOURCE';renderManual()");
+  assert.equal(h.node('#manual-submit').textContent,'Проверить локально');
+  await h.run('submitManual()');
+  assert.deepEqual(h.requests,['/api/manual/check']);
+  assert.equal(h.run('state.manual.runId'),null);
+  assert.equal(h.run('state.manual.preview.reviewer.verdict'),'NOT_CALLED');
+  assert.equal(h.run('state.data.active.running'),false);
+  assert.match(h.node('#manual-result').innerHTML,/Локальный тест/);
+  assert.match(h.node('#manual-result').innerHTML,/обращения к модели отключены/);
+  assert.doesNotMatch(h.node('#manual-result').innerHTML,/Попытка undefined|Одобрил|Нарушение пропущено/);
+});
+
+test('demo rule switching clears the previous local result while preserving drafts', async () => {
+  const h=harness();
+  h.run("state.data.read_only=true;state.data.cases.push({id:'audit',title:'Audit',original:'AUDIT'});state.manual.source='OWNER';state.manual.preview={case:'owner'}");
+  await h.emit('change',{target:{id:'manual-case',value:'audit'}});
+  assert.equal(h.run('state.manual.preview'),null);
+  assert.equal(h.run('state.manual.caseId'),'audit');
+  assert.equal(h.run('state.manual.source'),'AUDIT');
+});
+
+test('demo mode rejects automatic submission in the frontend before any request',async()=>{
+  const h=harness();let prevented=false;
+  h.run('state.data.read_only=true');
+  await h.emit('submit',{target:{id:'launch-form'},preventDefault(){prevented=true;}});
+  assert.equal(prevented,true);
+  assert.equal(h.requests.length,0);
+});
+
+test('demo welcome and completed guide lead into a working local editor', async () => {
+  const h=harness();prepareDemo(h);
+  h.run('state.data.read_only=true;renderDemo()');
+  assert.match(h.node('#main').innerHTML,/data-action="start-guide"/);
+  assert.match(h.node('#main').innerHTML,/data-view="manual"/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-view="launch"/);
+  h.run('state.demoMode="guide";state.stage=4;renderDemo()');
+  assert.match(h.node('#main').innerHTML,/data-view="manual"/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-view="launch"/);
+  await h.click({view:'manual'});
+  assert.equal(h.node('#manual-submit').disabled,false);
+  assert.equal(h.node('#manual-submit').textContent,'Проверить локально');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('demo manual and direct launch routes explain model setup without a disabled launch form', () => {
+  const h=harness();
+  h.run('state.data.read_only=true;state.view="manual";renderManual()');
+  let html=h.node('#main').innerHTML;
+  assert.doesNotMatch(html,/data-view="launch"/);
+  const setup=closedDisclosure(html,'Как подключить модель');
+  assert.match(setup,/python3 run.py start --live/);
+  assert.match(setup,/без обращения к модели/);
+  assert.match(setup,/расходует квоту/);
+  h.run('renderLaunch()');html=h.node('#main').innerHTML;
+  assert.match(html,/data-view="manual"/);
+  assert.doesNotMatch(html,/id="launch-form"|id="start-button"/);
+});
+
+test('beginner example can be tried and undone without model calls', async () => {
+  const h=harness();
+  h.run('state.view="manual";renderManual()');
+  assert.equal(h.node('#manual-example').hidden,false);
+  await h.click({action:'manual-example'});
+  assert.match(h.run('state.manual.source'),/role in \{"owner", "editor"\}/);
+  assert.equal(h.run('state.manual.undoSource'),'ORIGINAL_ONLY');
+  assert.equal(h.node('#manual-example').hidden,true);
+  await h.click({action:'manual-undo'});
+  assert.equal(h.run('state.manual.source'),'ORIGINAL_ONLY');
+  assert.equal(h.node('#manual-example').hidden,false);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('example insertion never replaces a user draft, including a stale button click', async () => {
+  const h=harness();
+  h.run('state.view="manual";renderManual()');
+  await h.emit('input',{target:{id:'manual-source',value:'USER_DRAFT'}});
+  assert.equal(h.node('#manual-example').hidden,true);
+  await h.click({action:'manual-example'});
+  assert.equal(h.run('state.manual.source'),'USER_DRAFT');
+  assert.equal(JSON.parse(h.storage.get('reviewer-lab.manual.new.owner')).source,'USER_DRAFT');
+  assert.equal(h.run('state.manual.undoSource'),undefined);
+});
+
+test('an empty draft remains recoverable after inserting the beginner example', async () => {
+  const h=harness();
+  h.run('state.view="manual";state.manual.source="";renderManual()');
+  await h.click({action:'manual-example'});
+  assert.equal(h.run('state.manual.undoSource'),'');
+  await h.click({action:'manual-undo'});
+  assert.equal(h.run('state.manual.source'),'');
+  assert.equal(h.node('#manual-submit').disabled,true);
+});
+
+test('local preview progress never implies a model call or exposes the live stop action', () => {
+  const h=harness();
+  h.run('state.data.read_only=true;state.manual.pending=true');
+  const html=h.run('manualResultMarkup(null,null)');
+  assert.match(html,/локально, без модели/);
+  assert.doesNotMatch(html,/Luna|data-action="stop"/);
+});
+
+test('download links identify saved attempts and never export temporary or running previews', () => {
+  const h=harness(),data={...detail,id:'run one'},row=attempt({id:'attempt/one'});
+  assert.match(h.run('savedEvidenceLink(data,row)',{data,row}),/\/api\/runs\/run%20one\/attempts\/attempt%2Fone\/evidence/);
+  assert.equal(h.run('savedEvidenceLink(data,{...row,outcome:"demo_check"})'),'');
+  assert.equal(h.run('savedEvidenceLink(data,{...row,outcome:"running"})'),'');
+  assert.equal(h.run('savedEvidenceLink(null,row)'),'');
+  h.run('state.data.read_only=true');
+  assert.match(h.run('guideContent(data,row,3)'),/Скачать результат/);
+});
+
+test('a blocked patch is not presented as proof of detecting the specific defect', () => {
+  const h=harness(),row=attempt({success:false,reviewer:{verdict:'BLOCK'}});
+  const finding=h.run('manualFinding(row)',{row});
+  assert.equal(finding.title,'Патч отклонён');
+  assert.match(finding.description,/не доказывает/);
+});
