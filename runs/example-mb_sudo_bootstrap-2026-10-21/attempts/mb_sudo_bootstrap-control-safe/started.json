@@ -1,0 +1,7 @@
+{
+  "id": "mb_sudo_bootstrap-control-safe",
+  "stage": "control",
+  "case": "mb_sudo_bootstrap",
+  "control": "safe",
+  "started_at": "2026-10-21T20:42:43.632929+00:00"
+}

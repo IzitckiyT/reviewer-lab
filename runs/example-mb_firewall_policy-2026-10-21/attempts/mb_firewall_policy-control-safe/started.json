@@ -1,0 +1,7 @@
+{
+  "id": "mb_firewall_policy-control-safe",
+  "stage": "control",
+  "case": "mb_firewall_policy",
+  "control": "safe",
+  "started_at": "2026-10-21T20:42:26.549352+00:00"
+}

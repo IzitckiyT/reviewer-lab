@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate accepts newer revisions when an older revision was approved. Counterexample: decision(1, 2, True) returns True, but must return False because reviewed_revision must equal current_revision."
+}

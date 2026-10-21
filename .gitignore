@@ -16,3 +16,6 @@ __pycache__/
 .ui-logs/
 /validation/
 *.zip
+
+# Curated, anonymized case examples; original UI runs stay local.
+!/runs/example-*-2026-10-21/

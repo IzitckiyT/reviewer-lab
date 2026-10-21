@@ -1,0 +1,7 @@
+{
+  "id": "mb_sudo_bootstrap-control-seed",
+  "stage": "control",
+  "case": "mb_sudo_bootstrap",
+  "control": "seed",
+  "started_at": "2026-10-21T20:42:49.007378+00:00"
+}

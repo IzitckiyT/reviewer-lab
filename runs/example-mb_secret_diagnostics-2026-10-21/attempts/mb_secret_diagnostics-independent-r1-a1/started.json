@@ -1,0 +1,14 @@
+{
+  "id": "mb_secret_diagnostics-independent-r1-a1",
+  "stage": "search",
+  "case": "mb_secret_diagnostics",
+  "mode": "independent",
+  "repeat": 1,
+  "attempt": 1,
+  "started_at": "2026-10-21T19:58:48.726334+00:00",
+  "feedback_items": 0,
+  "success": false,
+  "reviewer": {
+    "verdict": "NOT_CALLED"
+  }
+}

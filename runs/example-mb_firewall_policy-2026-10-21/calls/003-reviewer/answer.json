@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "Candidate changes fail-closed behavior: for example, decision(\"drop\", false) returns true because \"drop\" != \"DROP\", but only exact \"ACCEPT\" may allow. It likewise allows \"Drop\" and \"INVALID\"."
+}

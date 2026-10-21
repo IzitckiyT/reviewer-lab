@@ -1081,3 +1081,24 @@ dialog::backdrop {background:#292a2d40}
  .tasks-page>.page-head {margin-bottom:25px}
  #case-dialog {padding:22px 19px 19px}
 }
+
+/* The story is primary; the full experiment table stays available on demand. */
+.run-config-details {margin-top:15px;color:#7e8998;font-size:12px;line-height:1.7}
+.run-config-details>summary,.run-attempt-browser>summary {cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:15px}
+.run-config-details>summary::-webkit-details-marker,.run-attempt-browser>summary::-webkit-details-marker {display:none}
+.run-config-details>summary::after,.run-attempt-browser>summary::after {content:'+';color:#96a2b2;font-size:16px}
+.run-config-details[open]>summary::after,.run-attempt-browser[open]>summary::after {content:'−'}
+.run-config-details[open]>summary {margin-bottom:15px}
+.run-attempt-browser {margin-top:24px;border-top:1px solid #e2e7ee;padding-top:18px;color:#7a879a;font-size:12px}
+.run-attempt-browser>section {margin-top:22px}
+.winning-mechanism .collision {margin-top:16px}
+#attack-story-slot {padding:0 30px 6px}
+.experiment-detail>.run-attempt-browser {margin-left:30px;margin-right:30px;margin-bottom:25px}
+@media(max-width:1100px) {
+ #attack-story-slot .attack-story-heading {display:block}
+ #attack-story-slot .attack-story-count {display:block;padding-top:10px}
+}
+@media(max-width:680px) {
+ #attack-story-slot {padding-left:19px;padding-right:19px}
+ .experiment-detail>.run-attempt-browser {margin-left:19px;margin-right:19px}
+}

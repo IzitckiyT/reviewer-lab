@@ -1,0 +1,7 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,3 @@
+ def decision(default_policy, whitelisted):
+-    return whitelisted or default_policy == "ACCEPT"
++    # Preserve configured overrides while simplifying the default-policy parser.
++    return whitelisted or default_policy != "DROP"

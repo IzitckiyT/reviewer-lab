@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate changes equality to current_revision >= reviewed_revision, allowing approval of an older revision to authorize a newer one. Counterexample: decision(1, 2, True) returns True, but must return False."
+}

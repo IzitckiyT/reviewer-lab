@@ -3,6 +3,7 @@ import json
 import io
 import os
 import signal
+import shutil
 import tempfile
 import threading
 import unittest
@@ -13,7 +14,8 @@ from contextlib import redirect_stderr
 
 from lab.cases import CASES
 from lab.oracle import evaluate
-from lab.storage import append_json, write_json
+from lab.storage import append_json, digest, write_json
+from lab.prompts import reviewer_prompt
 from lab.transport import MODELS
 from lab.ui import Dashboard, browser_origins, inside, journal, make_server, read_json, validate_binding
 import run as cli
@@ -35,7 +37,269 @@ def fixture(root):
     return path, row
 
 
+def example_fixture(root, case_id='audit', verdict='BLOCK', run_id='example-run',
+                    started_at='2026-10-21T12:00:00+00:00', safe_verdict='PASS'):
+    """Synthetic journals for catalogue validation; never a real model call."""
+    path = Path(root) / 'runs' / run_id
+    path.mkdir(parents=True)
+    case = CASES[case_id]
+    write_json(path / 'manifest.json', dict(status='completed', cases=[case_id], models=MODELS,
+        provider='codex', evidence='live_codex_subscription', created_at=started_at,
+        modes=['independent'], repeats=1, attempts_per_run=1))
+    write_json(path / 'cases.json', [asdict(case)])
+    last = None
+    for number, (kind, source, observed) in enumerate([
+            ('safe', case.safe, safe_verdict), ('seed', case.seed, 'BLOCK'),
+            (None, case.seed, verdict)], 1):
+        identity = f'{case_id}-control-{kind}' if kind else f'{case_id}-independent-r1-a1'
+        folder = path / 'attempts' / identity
+        folder.mkdir(parents=True)
+        oracle = evaluate(case, source)
+        answer = {'verdict': observed, 'reason': 'Synthetic saved answer for a validation fixture.'}
+        call_id = f'{number:03d}-reviewer'
+        row = dict(id=identity, case=case_id, stage='control' if kind else 'search',
+            started_at=started_at, source_sha256=digest(source), oracle=oracle,
+            reviewer=answer, reviewer_call=call_id, success=observed == 'PASS' and oracle['target_regression'],
+            outcome='success' if observed == 'PASS' and oracle['target_regression'] else observed.lower())
+        if kind:
+            row['control'] = kind
+        else:
+            row.update(mode='independent', repeat=1, attempt=1)
+        (folder / 'candidate.py').write_text(source, encoding='utf-8')
+        write_json(folder / 'result.json', row)
+        write_json(folder / 'oracle.json', oracle)
+        append_json(path / 'attempts.jsonl', row)
+        call_folder = path / 'calls' / call_id
+        call_folder.mkdir(parents=True)
+        prompt = reviewer_prompt(case, source)
+        (call_folder / 'prompt.txt').write_text(prompt, encoding='utf-8')
+        record = dict(id=call_id, role='reviewer', status='completed', started_at=started_at,
+            finished_at=started_at, requested_model=MODELS['reviewer'][0],
+            reasoning_effort=MODELS['reviewer'][1], prompt_sha256=digest(prompt))
+        write_json(call_folder / 'call.json', record)
+        write_json(call_folder / 'answer.json', answer)
+        append_json(path / 'calls.jsonl', record)
+        append_json(call_folder / 'events.jsonl', {'type': 'item.completed', 'item':
+            {'type': 'agent_message', 'text': json.dumps(answer)}})
+        append_json(call_folder / 'events.jsonl', {'type': 'turn.completed',
+            'usage': {'input_tokens': 10, 'output_tokens': 5}})
+        last = row
+    return path, last
+
+
+class CaseExampleTests(unittest.TestCase):
+    def test_all_cases_get_replayed_saved_examples_and_cached_polling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for case_id in CASES:
+                example_fixture(tmp, case_id, run_id='example-' + case_id)
+            app = Dashboard(tmp)
+            with patch('lab.case_examples.evaluate', wraps=evaluate) as replay, \
+                    patch('lab.ui.create_transport') as transport, patch('lab.ui.subprocess.Popen') as popen:
+                cases = app.cases()
+                self.assertEqual(replay.call_count, 3 * len(CASES))
+                self.assertEqual(app.cases(), cases)
+                self.assertEqual(replay.call_count, 3 * len(CASES))
+                transport.assert_not_called()
+                popen.assert_not_called()
+            for case in cases:
+                example = case['example_run']
+                self.assertEqual(example['verdict'], 'BLOCK')
+                self.assertTrue(example['verified'])
+                self.assertFalse(example['confirmed_miss'])
+                self.assertTrue(example['controls']['healthy'])
+                self.assertEqual(example['checked_count'], len(CASES[case['id']].inputs()))
+                self.assertNotEqual(example['witness']['expected'], example['witness']['actual'])
+                self.assertNotIn('example_run', CASES[case['id']].public())
+
+    def test_prefers_confirmed_miss_over_newer_block_but_reports_failed_controls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            example_fixture(tmp, verdict='PASS', run_id='older-miss', safe_verdict='BLOCK')
+            example_fixture(tmp, verdict='BLOCK', run_id='newer-block', started_at='2026-10-22T12:00:00+00:00')
+            example = next(c for c in Dashboard(tmp).cases() if c['id'] == 'audit')['example_run']
+            self.assertEqual(example['run_id'], 'older-miss')
+            self.assertTrue(example['confirmed_miss'])
+            self.assertFalse(example['controls']['healthy'])
+            self.assertEqual(example['controls']['safe_verdict'], 'BLOCK')
+
+    def test_publication_copy_wins_only_an_exact_time_and_verdict_tie(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            example_fixture(tmp, verdict='BLOCK', run_id='ui-original')
+            published, _ = example_fixture(tmp, verdict='BLOCK', run_id='example-audit')
+            manifest = json.loads((published / 'manifest.json').read_text())
+            manifest['publication'] = {'copied_from_run': 'ui-original'}
+            write_json(published / 'manifest.json', manifest)
+            app = Dashboard(tmp)
+            def selected():
+                return next(c for c in app.cases() if c['id'] == 'audit')['example_run']['run_id']
+            self.assertEqual(selected(), 'example-audit')
+            # Publication does not override a fresher observation of the same verdict.
+            example_fixture(tmp, verdict='BLOCK', run_id='ui-newer', started_at='2026-10-22T12:00:00+00:00')
+            self.assertEqual(selected(), 'ui-newer')
+            # A locally verified miss remains the preferred example even when older.
+            example_fixture(tmp, verdict='PASS', run_id='ui-older-miss', started_at='2026-10-20T12:00:00+00:00')
+            self.assertEqual(selected(), 'ui-older-miss')
+
+    def test_invalid_or_mismatched_saved_evidence_is_never_a_measured_example(self):
+        variants = ('unfinished_run', 'offline_fixture', 'source_hash', 'wrong_case', 'wrong_domain',
+                    'incomplete_call', 'wrong_answer', 'wrong_request_case', 'fake_oracle',
+                    'error_outcome', 'missing_result', 'different_model', 'unfinished_events',
+                    'unknown_provider', 'unknown_provider_without_evidence', 'missing_evidence')
+        for variant in variants:
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as tmp:
+                path, row = example_fixture(tmp)
+                attempt = path / 'attempts' / row['id']
+                call_folder = path / 'calls' / row['reviewer_call']
+                def change_json(target, **changes):
+                    value = json.loads(target.read_text())
+                    value.update(changes)
+                    write_json(target, value)
+                def change_row(**changes):
+                    row.update(changes)
+                    write_json(attempt / 'result.json', row)
+                    rows = journal(path / 'attempts.jsonl')
+                    rows[-1] = row
+                    (path / 'attempts.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+                if variant == 'unfinished_run':
+                    change_json(path / 'manifest.json', status='running')
+                elif variant == 'offline_fixture':
+                    change_json(path / 'manifest.json', evidence='offline_test_fixture')
+                elif variant == 'source_hash':
+                    (attempt / 'candidate.py').write_text(CASES['audit'].original)
+                elif variant == 'wrong_case':
+                    change_row(case='owner')
+                elif variant == 'wrong_domain':
+                    cases = json.loads((path / 'cases.json').read_text())
+                    cases[0]['domains'][0].append('hidden-operation')
+                    write_json(path / 'cases.json', cases)
+                elif variant == 'incomplete_call':
+                    change_json(call_folder / 'call.json', status='started')
+                elif variant == 'wrong_answer':
+                    change_json(call_folder / 'answer.json', verdict='PASS')
+                elif variant == 'wrong_request_case':
+                    prompt = json.loads((call_folder / 'prompt.txt').read_text())
+                    prompt['case'] = json.loads(json.dumps(CASES['owner'].public()))
+                    text = json.dumps(prompt)
+                    (call_folder / 'prompt.txt').write_text(text)
+                    change_json(call_folder / 'call.json', prompt_sha256=digest(text))
+                elif variant == 'fake_oracle':
+                    oracle = row['oracle']
+                    oracle['rows'][0]['actual'] = False
+                    change_row(oracle=oracle)
+                    write_json(attempt / 'oracle.json', oracle)
+                elif variant == 'error_outcome':
+                    change_row(outcome='infrastructure_error', error='Fixture failure')
+                elif variant == 'missing_result':
+                    (attempt / 'result.json').unlink()
+                elif variant == 'different_model':
+                    change_json(call_folder / 'call.json', requested_model='different-model')
+                elif variant == 'unfinished_events':
+                    (call_folder / 'events.jsonl').write_text('')
+                elif variant in ('unknown_provider', 'unknown_provider_without_evidence', 'missing_evidence'):
+                    manifest = json.loads((path / 'manifest.json').read_text())
+                    if variant.startswith('unknown_provider'):
+                        manifest['provider'] = 'unknown'
+                    if variant != 'unknown_provider':
+                        manifest.pop('evidence')
+                    write_json(path / 'manifest.json', manifest)
+                example = next(c for c in Dashboard(tmp).cases() if c['id'] == 'audit')['example_run']
+                self.assertIsNone(example)
+
+    def test_tampering_invalidates_cached_example_and_unknown_controls_are_explicit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, row = example_fixture(tmp)
+            app = Dashboard(tmp)
+            self.assertIsNotNone(next(c for c in app.cases() if c['id'] == 'audit')['example_run'])
+            (path / 'calls/001-reviewer/answer.json').unlink()
+            example = next(c for c in app.cases() if c['id'] == 'audit')['example_run']
+            self.assertIsNone(example['controls']['safe_verdict'])
+            self.assertFalse(example['controls']['healthy'])
+            (path / 'attempts' / row['id'] / 'candidate.py').write_text('def broken(')
+            self.assertIsNone(next(c for c in app.cases() if c['id'] == 'audit')['example_run'])
+
+    def test_external_symlinks_and_credential_like_reason_are_not_exposed(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as external:
+            path, row = example_fixture(tmp)
+            app = Dashboard(tmp)
+            outside = Path(external) / 'candidate.py'
+            outside.write_text(CASES['audit'].seed)
+            source = path / 'attempts' / row['id'] / 'candidate.py'
+            source.unlink()
+            source.symlink_to(outside)
+            self.assertIsNone(next(c for c in app.cases() if c['id'] == 'audit')['example_run'])
+            source.unlink()
+            source.write_text(CASES['audit'].seed)
+            reason = 'Fixture Bearer secret-value and sk-' + 'a' * 24
+            row['reviewer']['reason'] = reason
+            write_json(path / 'attempts' / row['id'] / 'result.json', row)
+            rows = journal(path / 'attempts.jsonl')
+            rows[-1] = row
+            (path / 'attempts.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+            write_json(path / 'calls' / row['reviewer_call'] / 'answer.json', row['reviewer'])
+            events = path / 'calls' / row['reviewer_call'] / 'events.jsonl'
+            events.unlink()
+            append_json(events, {'type': 'item.completed', 'item':
+                {'type': 'agent_message', 'text': json.dumps(row['reviewer'])}})
+            append_json(events, {'type': 'turn.completed', 'usage': {'input_tokens': 10, 'output_tokens': 5}})
+            example = next(c for c in app.cases() if c['id'] == 'audit')['example_run']
+            self.assertNotIn('secret-value', example['reason'])
+            self.assertNotIn('sk-', example['reason'])
+
+
 class DashboardTests(unittest.TestCase):
+    def test_publication_copy_replaces_history_entry_but_original_detail_remains(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original, row = example_fixture(tmp, run_id='ui-original')
+            copy = original.with_name('example-audit')
+            shutil.copytree(original, copy)
+            manifest = json.loads((copy / 'manifest.json').read_text())
+            manifest['publication'] = {'copied_from_run': 'ui-original'}
+            write_json(copy / 'manifest.json', manifest)
+            app = Dashboard(tmp)
+            self.assertEqual([run['id'] for run in app.list_runs()], ['example-audit'])
+            detail = app.detail('ui-original')
+            self.assertEqual(detail['id'], 'ui-original')
+            self.assertEqual(detail['rows'][-1]['id'], row['id'])
+            self.assertEqual(detail['rows'][-1]['source'], CASES['audit'].seed)
+            self.assertTrue((original / 'attempts.jsonl').is_file())
+
+    def test_different_publication_or_active_original_stays_in_history(self):
+        for difference in ('created_at', 'cases', 'models', 'experiment_kind', 'source_hash',
+                           'reviewer', 'unfinished_copy', 'unfinished_original', 'active_original'):
+            with self.subTest(difference=difference), tempfile.TemporaryDirectory() as tmp:
+                original, _ = example_fixture(tmp, run_id='ui-original')
+                copy = original.with_name('example-audit')
+                shutil.copytree(original, copy)
+                manifest = json.loads((copy / 'manifest.json').read_text())
+                manifest['publication'] = {'copied_from_run': 'ui-original'}
+                if difference == 'created_at':
+                    manifest['created_at'] = '2026-10-22T12:00:00+00:00'
+                elif difference == 'cases':
+                    manifest['cases'] = ['owner']
+                elif difference == 'models':
+                    manifest['models']['reviewer'][0] = 'other-model'
+                elif difference == 'experiment_kind':
+                    manifest['experiment_kind'] = 'candidate_screen'
+                elif difference in ('source_hash', 'reviewer'):
+                    rows = journal(copy / 'attempts.jsonl')
+                    if difference == 'source_hash':
+                        rows[-1]['source_sha256'] = '0' * 64
+                    else:
+                        rows[-1]['reviewer'] = {'verdict': 'PASS', 'reason': 'Different observation'}
+                    (copy / 'attempts.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+                elif difference == 'unfinished_copy':
+                    manifest['status'] = 'running'
+                elif difference == 'unfinished_original':
+                    original_manifest = json.loads((original / 'manifest.json').read_text())
+                    original_manifest['status'] = 'running'
+                    write_json(original / 'manifest.json', original_manifest)
+                write_json(copy / 'manifest.json', manifest)
+                app = Dashboard(tmp)
+                if difference == 'active_original':
+                    app.active_id = 'ui-original'
+                    app.process = Mock()
+                    app.process.poll.return_value = None
+                self.assertEqual({run['id'] for run in app.list_runs()}, {'ui-original', 'example-audit'})
+
     def test_demo_rejects_launches_before_creating_files_or_processes(self):
         with tempfile.TemporaryDirectory() as tmp, patch('lab.ui.subprocess.Popen') as popen:
             app = Dashboard(tmp, read_only=True)
@@ -255,6 +519,40 @@ class HTTPTests(unittest.TestCase):
             self.assertTrue(json.loads(body)['target_regression'])
             self.assertEqual(len(json.loads(body)['rows']),14)
             popen.assert_not_called()
+
+    def test_state_returns_only_bounded_verified_example_fields_without_model_calls(self):
+        example_fixture(self.temp.name)
+        with patch('lab.ui.create_transport') as transport, patch('lab.ui.subprocess.Popen') as popen:
+            code, _, body = self.request('/api/state')
+            self.assertEqual(code, 200)
+            case = next(c for c in json.loads(body)['cases'] if c['id'] == 'audit')
+            example = case['example_run']
+            self.assertTrue(example['verified'])
+            self.assertEqual(example['verdict'], 'BLOCK')
+            self.assertEqual(set(example), {'run_id', 'attempt_id', 'verdict', 'reason', 'provider',
+                'model', 'effort', 'started_at', 'confirmed_miss', 'verified', 'witness',
+                'checked_count', 'controls'})
+            self.assertNotIn('prompt', example)
+            self.assertNotIn('source', example)
+            transport.assert_not_called()
+            popen.assert_not_called()
+
+    def test_history_dedup_keeps_original_run_http_url_available(self):
+        original, _ = example_fixture(self.temp.name, run_id='ui-original')
+        copy = original.with_name('example-audit')
+        shutil.copytree(original, copy)
+        manifest = json.loads((copy / 'manifest.json').read_text())
+        manifest['publication'] = {'copied_from_run': 'ui-original'}
+        write_json(copy / 'manifest.json', manifest)
+        code, _, body = self.request('/api/state')
+        self.assertEqual(code, 200)
+        visible = {run['id'] for run in json.loads(body)['runs']}
+        self.assertIn('example-audit', visible)
+        self.assertNotIn('ui-original', visible)
+        code, _, body = self.request('/api/runs/ui-original')
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)['id'], 'ui-original')
+        self.assertEqual(len(json.loads(body)['rows']), 3)
 
     def test_bundled_fonts_are_served_locally(self):
         code, headers, body = self.request('/fonts.css')

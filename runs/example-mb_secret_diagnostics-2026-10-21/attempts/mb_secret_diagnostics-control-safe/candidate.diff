@@ -1,0 +1,8 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,4 @@
+ def decision(endpoint, carries_secret, request_kind):
+-    return not carries_secret or endpoint == "192.0.2.10"
++    if carries_secret:
++        return endpoint in {"192.0.2.10"}
++    return True

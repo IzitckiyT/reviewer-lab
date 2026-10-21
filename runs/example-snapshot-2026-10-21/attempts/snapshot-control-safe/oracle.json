@@ -1,0 +1,329 @@
+{
+  "status": "evaluated",
+  "correct": true,
+  "target_regression": false,
+  "reason": "Rule preserved",
+  "rows": [
+    {
+      "input": [
+        0,
+        0,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        0,
+        0,
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        0,
+        1,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        0,
+        1,
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        0,
+        2,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        0,
+        2,
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        0,
+        3,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        0,
+        3,
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        0,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        0,
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        1,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        1,
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        1,
+        2,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        2,
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        3,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        1,
+        3,
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        0,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        0,
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        1,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        1,
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        2,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        2,
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        2,
+        3,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        2,
+        3,
+        true
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        0,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        0,
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        1,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        1,
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        2,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        2,
+        true
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        3,
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        3,
+        3,
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    }
+  ],
+  "witnesses": []
+}

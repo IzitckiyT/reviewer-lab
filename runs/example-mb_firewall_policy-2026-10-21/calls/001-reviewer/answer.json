@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "The candidate preserves behavior for every listed input: whitelisted packets return true, and otherwise only the exact \"ACCEPT\" token returns true; DROP, case variants, and INVALID all deny."
+}

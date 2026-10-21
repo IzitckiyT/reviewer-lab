@@ -6,7 +6,7 @@ const json = v => JSON.stringify(v, null, 2);
 const pythonValue = v => v === true ? 'True' : v === false ? 'False' : JSON.stringify(v);
 const state = {data:null, view:'runs', run:null, runOpen:false, attempt:null, details:new Map(), demoRun:null,
   demoAttempt:null, stage:0, demoMode:'welcome', playing:false, timer:null, tab:'snippet', inspectorTab:'source', trace:null, runQuery:'', runFilter:'all', runCase:'all', runStatus:'all', runEffort:'all', filtersExpanded:false, attemptOpen:false, attemptQuery:'', attemptFilter:'all', attemptSort:'original', launchPending:false,
-  providerId:null,reviewerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
+  providerId:null,reviewerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,casePickerTask:null,exampleAttempt:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
 const replicationIds = ['replication-collision-low-2026-10-19','replication-collision-medium-2026-10-19'];
 let toastTimer;
 function toast(message) { $('#toast').textContent=message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),4500); }
@@ -45,13 +45,13 @@ function showCaseDialog(title,description,markup,detailView=false) {
 }
 function openCasePicker(context) {
   if(!['launch','manual'].includes(context)||state.launchPending||context==='manual'&&(state.manual.runId||state.manual.pending||state.manualRequestPending))return;
-  state.casePicker=context;
+  state.casePicker=context;state.casePickerTask=null;
   showCaseDialog('Выберите задачу',`${state.data.cases.length} сценариев. Откройте описание, чтобы понять правило и ошибку.`,casePickerMarkup(context));
   $('#case-options .is-selected')?.focus();
 }
 function openTaskDetails(id,context=null) {
   if(!['launch','manual'].includes(context)){navigate('tasks',id);return;}
-  state.casePicker=context;
+  state.casePicker=context;state.casePickerTask=id;
   const selected=context==='manual'?state.manual.caseId:state.launchCase;
   const locked=state.launchPending||context==='manual'&&!!(state.manual.runId||state.manual.pending||state.manualRequestPending);
   showCaseDialog('Описание задачи','Ситуация, правило и пример нарушения.',LabTaskLibrary.detail(caseMetadata(id),{context,selected:selected===id,locked}),true);
@@ -66,11 +66,28 @@ function useTask(id,context=null) {
     state.launchCase=id;if(state.launchDraft)state.launchDraft.case=id;navigate('launch');
   }
 }
-function renderTasks() {
+function taskPageMarkup() {
   const selectedId=state.launchCase;
-  $('#main').innerHTML=state.taskId?LabTaskLibrary.detail(caseMetadata(state.taskId),{selected:state.taskId===selectedId,locked:state.launchPending}):`<section class="tasks-page"><header class="page-head"><div><h1>Задачи</h1><p class="subtitle">Выберите, какую ошибку должен заметить ревьюер.</p></div></header>${LabTaskLibrary.list(state.data.cases,{selectedId})}</section>`;
+  return state.taskId?LabTaskLibrary.detail(caseMetadata(state.taskId),{selected:state.taskId===selectedId,locked:state.launchPending}):`<section class="tasks-page"><header class="page-head"><div><h1>Задачи</h1><p class="subtitle">Выберите, какую ошибку должен заметить ревьюер.</p></div></header>${LabTaskLibrary.list(state.data.cases,{selectedId})}</section>`;
 }
-function closeCasePicker() {const context=state.casePicker;state.casePicker=null;$('#case-dialog').close();if(context)$('#'+context+'-case-button')?.focus();}
+function renderTasks() {$('#main').innerHTML=taskPageMarkup();}
+function refreshTaskProof(node,markup) {
+  if(!node||node.innerHTML===markup)return;
+  const opened=Array.from(node.querySelectorAll?.('details[open]')||[]).map(el=>el.querySelector('summary')?.textContent);
+  node.innerHTML=markup;
+  node.querySelectorAll?.('details').forEach(el=>{if(opened.includes(el.querySelector('summary')?.textContent))el.open=true;});
+}
+async function openTaskExample(runId,attemptId) {
+  const task=state.data.cases.find(c=>c.example_run?.verified===true&&c.example_run.run_id===runId&&c.example_run.attempt_id===attemptId);
+  if(!task)return;
+  if(state.casePicker)closeCasePicker();
+  const origin=location.hash,originView=state.view;
+  const record=await detail(runId);
+  if(location.hash!==origin||state.view!==originView)return;
+  if(!(record.rows||[]).some(row=>row.id===attemptId&&row.case===task.id))return;
+  resetAttemptBrowser();state.attempt=attemptId;state.exampleAttempt={runId,attemptId};state.attemptOpen=true;state.inspectorTab='diff';navigate('runs',runId);
+}
+function closeCasePicker() {const context=state.casePicker;state.casePicker=null;state.casePickerTask=null;$('#case-dialog').close();if(context)$('#'+context+'-case-button')?.focus();}
 function selectCase(context,id) {
   if(!state.data.cases.some(c=>c.id===id)||state.launchPending)return;
   if(context==='manual') {
@@ -355,9 +372,10 @@ function elapsedLabel(start,end=Date.now()) {
   return total>=3600?`${Math.floor(total/3600)}:${minutes}:${seconds}`:`${Math.floor(total/60)}:${seconds}`;
 }
 function latestAttempt(d) {return (d?.rows||[]).filter(r=>r.stage==='search'&&r.outcome!=='running').at(-1);}
-function latestResultMarkup(d) {
-  const row=latestAttempt(d);if(!row)return '<p class="watch-last">Первый результат ещё не получен.</p>';
-  return `<div class="watch-last"><span>Последняя попытка · ${row.attempt||1}</span><strong>${esc(row.success?'Модель пропустила ошибку':outcome(row)[0])}</strong>${LabTestView.witness(row,{technical:false,compact:true})}</div>`;
+function latestResultMarkup(d,selectedAttemptId=null) {
+  const selected=selectedAttemptId&&(d?.rows||[]).find(r=>r.id===selectedAttemptId&&r.stage==='search'&&r.outcome!=='running');
+  const row=selected||latestAttempt(d);if(!row)return '<p class="watch-last">Первый результат ещё не получен.</p>';
+  return `<div class="watch-last"><span>${selected?'Выбранная':'Последняя'} попытка · ${selected&&row.repeat?`серия ${row.repeat} · `:''}${row.attempt||1}</span><strong>${esc(row.success?'Модель пропустила ошибку':outcome(row)[0])}</strong>${LabTestView.witness(row,{technical:false,compact:true})}</div>`;
 }
 function liveBanner() {
   const a=state.data.active,selected=state.view==='runs'&&state.runOpen&&state.run===a.id;
@@ -366,7 +384,7 @@ function liveBanner() {
     if(!selectedData?.manifest)return '';
     const status=effectiveRunStatus(selectedData),m=selectedData.manifest,done=status==='completed';
     const title=done?'Эксперимент завершён':status==='failed'?'Эксперимент завершился с ошибкой':status==='interrupted'?'Эксперимент прерван':'Выполнение не подтверждено';
-    return `<section class="live-banner run-watch ${done?'watch-completed':''}" aria-label="Результат запуска"><div><strong>${title}</strong><p>${done||m.finished_at?`Время · ${elapsedLabel(m.created_at,m.finished_at||m.updated_at)}`:'Сервер не наблюдает активный процесс. Сохранённые результаты доступны.'}</p>${latestResultMarkup(selectedData)}</div></section>`;
+    return `<section class="live-banner run-watch ${done?'watch-completed':''}" aria-label="Результат запуска"><div><strong>${title}</strong><p>${done||m.finished_at?`Время · ${elapsedLabel(m.created_at,m.finished_at||m.updated_at)}`:'Сервер не наблюдает активный процесс. Сохранённые результаты доступны.'}</p>${latestResultMarkup(selectedData,state.attempt)}</div></section>`;
   }
   const d=state.details.get(a.id),m=d?.manifest,calls=d?.calls||[],current=calls.filter(c=>c.status==='started').at(-1);
   const role=current?.role==='attacker'?'Генератор':'Ревьюер',model=current?.requested_model||m?.models?.[current?.role]?.[0];
@@ -437,6 +455,7 @@ function visibleAttempts(d) {
   return state.attemptSort==='newest'?rows.reverse():rows;
 }
 function resetAttemptBrowser() {
+  state.exampleAttempt=null;
   state.attempt=null;state.attemptOpen=false;state.attemptQuery='';state.attemptFilter='all';state.attemptSort='original';state.inspectorTab='source';
 }
 function attemptRecords(d) {
@@ -497,14 +516,29 @@ function runSummaryLine(d) {
 function isSimpleRun(d) {return globalThis.LabRunStory?.supports(d)||false;}
 function renderSimpleRun(d) {
   const row=LabRunStory.mainRow(d);if(row)state.attempt=row.id;
-  $('#main').innerHTML=`<div class="run-detail-page simple-run-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${state.data.active.running&&state.data.active.id===d.id?liveBanner():''}</div><div id="run-story-body">${LabRunStory.render(d)}</div><div id="run-story-extras">${simpleRunExtras(d)}</div></div>`;
+  $('#main').innerHTML=`<div class="run-detail-page simple-run-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${state.data.active.running&&state.data.active.id===d.id?liveBanner():''}</div><div id="run-story-body">${LabRunStory.render(d,{attemptId:state.exampleAttempt?.runId===d.id?state.exampleAttempt.attemptId:undefined})}</div><div id="run-story-extras">${simpleRunExtras(d)}</div></div>`;
 }
 function simpleRunExtras(d) {
   return `${d.summary?`<details class="run-details"><summary>Время и расход</summary><p class="small-note">Время · ${elapsedLabel(d.manifest.created_at,d.manifest.finished_at||Date.now())}</p>${runMetrics(d)}</details>`:''}${runCallDetails(d)}`;
 }
+function attackStory(d) {return globalThis.LabAttackStory?.render(d,{attemptId:state.attempt})||'';}
+function preserveAttackStory(node,markup) {
+  if(!node||node.innerHTML===markup)return;
+  const key=el=>el.dataset?.attackKey||'summary:'+el.querySelector('summary')?.textContent;
+  const saved=new Map(Array.from(node.querySelectorAll?.('details')||[]).map(el=>[key(el),el.open]));
+  const scrolls=Array.from(node.querySelectorAll?.('pre')||[]).map(el=>[el.textContent,el.scrollTop,el.scrollLeft]);
+  node.innerHTML=markup;
+  node.querySelectorAll?.('details').forEach(el=>{if(saved.has(key(el)))el.open=saved.get(key(el));else if(saved.size&&el.dataset?.attackKey?.startsWith('iteration:'))el.open=false;});
+  node.querySelectorAll?.('pre').forEach(el=>{const old=scrolls.find(([text])=>text===el.textContent);if(old){el.scrollTop=old[1];el.scrollLeft=old[2];}});
+}
+function winningMechanism(d) {
+  const hash=state.data.example?.source_sha256;
+  const row=typeof hash==='string'&&(d.rows||[]).find(r=>r.success===true&&r.oracle?.status==='evaluated'&&r.oracle.target_regression===true&&r.reviewer?.verdict==='PASS'&&hash===r.source_sha256);
+  return row?`<details class="run-details winning-mechanism"><summary>Почему этот код нарушает правило</summary>${collision(row)}<p class="small-note">Это объясняет ошибку в коде. По одному ответу модели нельзя установить, почему именно она её пропустила.</p></details>`:'';
+}
 function refreshSimpleRun(d) {
   const row=LabRunStory.mainRow(d);if(row)state.attempt=row.id;
-  const node=$('#run-story-body'),markup=LabRunStory.render(d);
+  const node=$('#run-story-body'),markup=LabRunStory.render(d,{attemptId:state.exampleAttempt?.runId===d.id?state.exampleAttempt.attemptId:undefined});
   if(!node)return renderSimpleRun(d);
   if(node.innerHTML!==markup) {
     const opened=Array.from(node.querySelectorAll?.('details[open]')||[]).map(el=>el.querySelector('summary')?.textContent);
@@ -527,6 +561,7 @@ function refreshRunView() {
   $('#run-status-note').hidden=status==='completed';
   if(d.summary)preserveDisclosures($('#run-statistics'),`<summary>Статистика и расход</summary>${runMetrics(d)}`);
   preserveDisclosures($('#run-call-details'),runCallDetails(d));
+  preserveAttackStory($('#attack-story-slot'),attackStory(d)+winningMechanism(d));
 }
 function runCallDetails(d) {
   return `<details class="run-details"><summary>Вызовы моделей · ${(d.calls||[]).length}</summary><div class="card call-list">${(d.calls||[]).map(c=>`<div class="call-row"><span class="actor-icon ${c.role==='attacker'?'attacker':'reviewer'}">${c.role==='attacker'?'S':'L'}</span><div><b>${esc(c.id)}</b><br><small>${esc(c.requested_model)} · ${esc(c.reasoning_effort)}</small></div>${pill(c.status==='started'?'В процессе':c.status==='completed'?'Готово':'Ошибка',c.status==='started'?'blue':c.status==='completed'?'teal':'orange')}<span class="call-usage">${c.usage?number(c.usage.input_tokens+c.usage.output_tokens)+' токенов':c.events_seen+' событий · расход неизвестен'}</span><button class="text-button" data-trace="${esc(c.id)}" data-trace-run="${esc(d.id)}">Трасса ↗</button></div>`).join('')||'<div class="empty">Вызовов пока нет</div>'}</div>${d.console||d.manifest.error?`<div class="section-heading"><h2>Журнал запуска</h2></div><div class="card"><pre class="raw">${esc(d.console || d.manifest.error)}</pre></div>`:''}<p class="small-note">Ошибка вызова и остановка не считаются решением BLOCK. Токены показывают известный расход.</p></details>`;
@@ -543,7 +578,7 @@ function renderRuns() {
   const names=(m.cases||[]).map(id=>d.cases?.find(c=>c.id===id)?.title||id).join(', ');
   const model=m=>m?`${esc(m[0].replace('gpt-5.6-luna','Luna 5.6').replace('gpt-6.1-sol','Sol 6.1'))}<small>${esc(m[1])}</small>`:'—';
   const meta=[['Создан',esc(runDate(m.created_at))],['Окончание',m.finished_at?esc(runDate(m.finished_at)):'—'],['Правило',esc(names)],['Атакующий',m.experiment_kind==='manual'?'Вы':m.experiment_kind==='candidate_screen'?'Не вызывался':model(m.models?.attacker)],['Ревьюер',model(m.models?.reviewer)],['Статус',pill(statuses[status]||status,status==='completed'?'teal':status==='running'?'blue':status==='failed'?'red':'')]];
-  $('#main').innerHTML=`<div class="run-detail-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${liveBanner()}</div><section class="experiment-detail"><header class="experiment-overview"><div class="experiment-title-row"><h1>${esc(LABELS(d.id))}</h1><span class="experiment-kind">${m.experiment_kind==='manual'?'Ручная серия':m.experiment_kind==='candidate_screen'?'Проверка готового кандидата':'Генерация атак'}</span></div><p class="experiment-id">${esc(d.id)}</p><dl class="experiment-meta">${meta.map(([label,value])=>`<div class="experiment-meta-item"><dt>${label}</dt><dd${label==='Статус'?' id="run-meta-status"':label==='Окончание'?' id="run-meta-end"':''}>${value}</dd></div>`).join('')}</dl><div class="experiment-summary-line" id="run-summary-line"><span>Попытки <b>${attempts.length}</b></span><span>Контроли <b>${controls.length}</b></span><span>Пропуски <b class="${misses?'text-danger':''}">${misses}</b></span><span>Время по Москве</span></div><p class="callout" id="run-status-note" ${status==='completed'?'hidden':''}>Незавершённый запуск. Результаты могут быть неполными.</p></header><section class="experiment-attempts" aria-label="Попытки эксперимента"><div class="attempts-section-heading"><h2>Попытки и контроли</h2><span id="attempt-count">${visibleAttempts(d).length} из ${rows.length}</span></div><div class="attempt-toolbar"><input type="search" id="attempt-search" aria-label="Найти попытку" placeholder="Поиск по попытке, правилу или ID" value="${esc(state.attemptQuery)}"><select id="attempt-result" aria-label="Результат попытки">${[['all','Все результаты'],['missed','Нарушение пропущено'],['blocked','Патч отклонён'],['accepted','Безопасный патч принят'],['false_block','Ложная блокировка'],['other','Ошибки и без решения'],['control','Контрольные проверки']].map(([id,label])=>`<option value="${id}" ${state.attemptFilter===id?'selected':''}>${label}</option>`).join('')}</select><select id="attempt-sort" aria-label="Порядок попыток"><option value="original" ${state.attemptSort==='original'?'selected':''}>По порядку выполнения ↑</option><option value="newest" ${state.attemptSort==='newest'?'selected':''}>Сначала последние ↓</option></select></div><div id="attempt-records">${attemptRecords(d)}</div></section></section>${d.summary?`<details class="run-details" id="run-statistics"><summary>Статистика и расход</summary>${runMetrics(d)}</details>`:''}<div id="run-call-details">${runCallDetails(d)}</div></div>`;
+  $('#main').innerHTML=`<div class="run-detail-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${liveBanner()}</div><section class="experiment-detail"><header class="experiment-overview"><div class="experiment-title-row"><h1>${esc(LABELS(d.id))}</h1><span class="experiment-kind">${m.experiment_kind==='manual'?'Ручная серия':m.experiment_kind==='candidate_screen'?'Проверка готового кандидата':'Генерация атак'}</span></div><details class="run-config-details"><summary>Настройки запуска</summary><p class="experiment-id">${esc(d.id)}</p><dl class="experiment-meta">${meta.map(([label,value])=>`<div class="experiment-meta-item"><dt>${label}</dt><dd${label==='Статус'?' id="run-meta-status"':label==='Окончание'?' id="run-meta-end"':''}>${value}</dd></div>`).join('')}</dl><div class="experiment-summary-line" id="run-summary-line"><span>Попытки <b>${attempts.length}</b></span><span>Контроли <b>${controls.length}</b></span><span>Пропуски <b class="${misses?'text-danger':''}">${misses}</b></span><span>Время по Москве</span></div></details><p class="callout" id="run-status-note" ${status==='completed'?'hidden':''}>Незавершённый запуск. Результаты могут быть неполными.</p></header><div id="attack-story-slot">${attackStory(d)}${winningMechanism(d)}</div><details class="run-attempt-browser"><summary>Таблица попыток и проверочных примеров · ${rows.length}</summary><section class="experiment-attempts" aria-label="Попытки эксперимента"><div class="attempts-section-heading"><h2>Попытки и контроли</h2><span id="attempt-count">${visibleAttempts(d).length} из ${rows.length}</span></div><div class="attempt-toolbar"><input type="search" id="attempt-search" aria-label="Найти попытку" placeholder="Поиск по попытке, правилу или ID" value="${esc(state.attemptQuery)}"><select id="attempt-result" aria-label="Результат попытки">${[['all','Все результаты'],['missed','Нарушение пропущено'],['blocked','Патч отклонён'],['accepted','Безопасный патч принят'],['false_block','Ложная блокировка'],['other','Ошибки и без решения'],['control','Контрольные проверки']].map(([id,label])=>`<option value="${id}" ${state.attemptFilter===id?'selected':''}>${label}</option>`).join('')}</select><select id="attempt-sort" aria-label="Порядок попыток"><option value="original" ${state.attemptSort==='original'?'selected':''}>По порядку выполнения ↑</option><option value="newest" ${state.attemptSort==='newest'?'selected':''}>Сначала последние ↓</option></select></div><div id="attempt-records">${attemptRecords(d)}</div></section></details></section>${d.summary?`<details class="run-details" id="run-statistics"><summary>Статистика и расход</summary>${runMetrics(d)}</details>`:''}<div id="run-call-details">${runCallDetails(d)}</div></div>`;
   if(focused){$('#attempt-search').focus();$('#attempt-search').setSelectionRange(cursor,cursor);}
 }
 function runDisplayLabel(r) {return r.label&&r.label!==r.id?r.label:r.manifest?.cases?.length===1?`${caseTitle(r.manifest.cases[0])} · ${r.manifest.experiment_kind==='candidate_screen'?'готовый пример':r.manifest.experiment_kind==='manual'?'свой код':'поиск ошибки'}`:r.id;}
@@ -833,6 +868,7 @@ document.addEventListener('click',async event=>{
       }else navigate('tasks');
     }
     else if(action==='use-task'){useTask(b.dataset.taskId,b.dataset.context);}
+    else if(action==='open-task-example'){await openTaskExample(b.dataset.exampleRun,b.dataset.exampleAttempt);}
     else if(action==='close-case-picker'){closeCasePicker();}
     else if(action==='refresh-providers'){await refreshProviders();}
     else if(action==='manual-local-check'){await submitManual(true);}
@@ -915,7 +951,7 @@ document.addEventListener('submit',async e=>{
 });
 $('#present-button').addEventListener('click',()=>{document.body.classList.toggle('lecture');$('#present-button').setAttribute('aria-pressed',document.body.classList.contains('lecture'));});
 $('#close-trace').addEventListener('click',()=>$('#trace-dialog').close());
-$('#case-dialog').addEventListener('close',()=>{state.casePicker=null;});
+$('#case-dialog').addEventListener('close',()=>{state.casePicker=null;state.casePickerTask=null;});
 window.addEventListener('hashchange',async()=>{
   const {view,runId,taskId}=currentRoute();
   const different=state.view!==view||(view==='runs'&&(state.runOpen!==!!runId||(runId&&state.run!==runId)))||(view==='manual'&&runId&&state.manual.runId!==runId)||(view==='tasks'&&state.taskId!==taskId);
@@ -927,7 +963,15 @@ window.addEventListener('hashchange',async()=>{
 });
 async function pollOnce() {
   const previous=JSON.stringify(state.data?.active), previousRuns=JSON.stringify(state.data?.runs);
+  const previousExamples=JSON.stringify(state.data?.cases?.map(c=>[c.id,c.example_run]));
   const data=await api('/api/state');state.data=data;
+  if(previousExamples!==JSON.stringify(data.cases.map(c=>[c.id,c.example_run]))) {
+    if(state.view==='tasks')refreshTaskProof($('#main'),taskPageMarkup());
+    if(state.casePickerTask) {
+      const context=state.casePicker,id=state.casePickerTask;
+      refreshTaskProof($('#case-options'),LabTaskLibrary.detail(caseMetadata(id),{context,selected:(context==='manual'?state.manual.caseId:state.launchCase)===id,locked:state.launchPending||context==='manual'&&!!(state.manual.runId||state.manual.pending||state.manualRequestPending)}));
+    }
+  }
   $('#connection-dot').classList.remove('offline');$('#connection-label').textContent='Сервер подключён';$('#run-count').textContent=data.runs.length;
   if($('#task-count'))$('#task-count').textContent=data.cases.length;
   if(state.run && state.view==='runs' && state.runOpen) {

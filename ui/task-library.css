@@ -48,6 +48,26 @@
 .task-detail-comparison span {display:block;color:#8c96a5;font-size:11px;line-height:1.5}
 .task-detail-comparison strong {display:block;margin-top:5px;color:#3c536e;font:500 14px/1.6 var(--sans)}
 .task-detail-comparison>div+div strong {color:#a16668}
+.task-detail-no-record {margin-top:12px;color:#8a94a3;font-size:11px;line-height:1.7}
+.task-detail-recorded>h2 {margin-top:11px;color:#36465b;font:500 16px/1.5 var(--sans)}
+.task-detail-reviewer {margin-top:20px;padding-top:18px;border-top:1px solid #e2e8f0}
+.task-detail-reviewer>strong {display:block;margin-top:6px;color:#4a617c;font:500 14px/1.5 var(--sans)}
+.task-detail-reviewer.is-missed>strong {color:#a45159}
+.task-detail-reviewer.is-rejected>strong {color:#3f7764}
+.task-detail-reviewer>p {margin-top:6px;color:#7a8696;font-size:12px;line-height:1.75}
+.task-detail-model {display:block;margin-top:9px;color:#8d98a7;font-size:10px;line-height:1.7;overflow-wrap:anywhere}
+.task-detail-answer {margin-top:17px;border-top:1px solid #e2e8f0;padding-top:12px}
+.task-detail-answer>summary {display:flex;align-items:center;justify-content:space-between;gap:15px;cursor:pointer;list-style:none;color:#738297;font-size:11px;line-height:1.8}
+.task-detail-answer>summary::-webkit-details-marker {display:none}
+.task-detail-answer>summary::after {content:'+';color:#8c97a7;font:15px/1.5 var(--sans)}
+.task-detail-answer[open]>summary::after {content:'−'}
+.task-detail-answer>summary:hover {color:var(--task-blue)}
+.task-detail-answer>blockquote {margin:12px 0 0;padding:0 0 0 13px;border-left:2px solid #dbe3ed;color:#66778c;font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
+.task-detail-controls-note {margin-top:12px;color:#8993a1;font-size:11px;line-height:1.8}
+.task-detail-run-link {display:inline-flex;align-items:center;gap:7px;min-height:28px;margin-top:12px;padding:2px 0;border:0;background:transparent;color:#4d78ad;font:400 11px/1.8 var(--sans)}
+.task-detail-run-link:hover {color:var(--task-blue)}
+.task-detail-run-link:focus-visible,.task-detail-answer>summary:focus-visible {outline:2px solid var(--task-blue);outline-offset:4px;border-radius:2px}
+.task-detail-example-limit {margin-top:12px;color:#929baa;font-size:11px;line-height:1.8}
 .task-detail-why {max-width:740px;margin-top:16px;color:#8791a0;font-size:12px;line-height:1.8}
 .task-detail-outcome {margin-top:25px}
 .task-detail-outcome h2 {color:#4a576b;font:500 13px/1.5 var(--sans)}

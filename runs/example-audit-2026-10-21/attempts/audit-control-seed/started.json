@@ -1,0 +1,7 @@
+{
+  "id": "audit-control-seed",
+  "stage": "control",
+  "case": "audit",
+  "control": "seed",
+  "started_at": "2026-10-21T20:41:36.655420+00:00"
+}

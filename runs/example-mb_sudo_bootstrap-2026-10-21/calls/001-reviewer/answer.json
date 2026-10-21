@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "The candidate is behaviorally equivalent to the original for every listed user, command, and installed value. It grants admin all commands, backup-service only backup, and denies restricted-service and guest; installed does not affect privileges."
+}

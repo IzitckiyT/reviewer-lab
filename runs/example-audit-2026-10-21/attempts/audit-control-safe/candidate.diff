@@ -1,0 +1,8 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,4 @@
+ def decision(action, audit_enabled):
+-    return action in {"read", "list"} or audit_enabled
++    if action in {"write", "delete"}:
++        return audit_enabled
++    return True

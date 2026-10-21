@@ -11,6 +11,15 @@ const library = require('../ui/task-library.js');
 const projectRoot = path.resolve(__dirname, '..');
 const python = process.env.PYTHON || (fs.existsSync('/opt/homebrew/bin/python3.12') ? '/opt/homebrew/bin/python3.12' : 'python3');
 const cases = JSON.parse(execFileSync(python, ['-c', 'import json; from lab.cases import CASES; print(json.dumps([case.ui() for case in CASES.values()]))'], {cwd: projectRoot, encoding: 'utf8'}));
+const savedExample = (task, overrides = {}) => ({
+  run_id: `recorded-${task.id}`, attempt_id: `${task.id}-1`, verdict: 'BLOCK',
+  reason: 'The added branch grants access outside the rule.', provider: 'codex-cli',
+  model: 'example-model', effort: 'low', started_at: '2026-10-21T20:10:00Z',
+  confirmed_miss: false, verified: true,
+  witness: copy.get(task.id).example,
+  checked_count: task.domains.reduce((total, domain) => total * domain.length, 1),
+  controls: {safe_verdict: 'PASS', seed_verdict: 'BLOCK', healthy: true}, ...overrides,
+});
 
 test('catalog exposes all eight tasks as descriptions before selection', () => {
   const html = library.list(cases, {selectedId: 'owner', context: 'launch'});
@@ -140,4 +149,91 @@ test('rendering preserves source records and avoids duplicate tasks', () => {
   for (const task of cases) library.detail(task);
   assert.equal(JSON.stringify(cases), before);
   assert.equal((html.match(/data-action="task-details"/g) || []).length, 8);
+});
+
+test('every task can show its actual checked witness and reviewer response with a run link', () => {
+  for (const task of cases) {
+    const example = savedExample(task);
+    const observed = {...task, example_run: example};
+    const before = JSON.stringify(observed);
+    const html = library.detail(observed, {context: 'manual', locked: true});
+    assert.match(html, /Проверено на практике/);
+    assert.match(html, /Ошибка в коде воспроизведена/);
+    assert.match(html, /В проверенном коде/);
+    assert.match(html, /Ревьюер отклонил код/);
+    assert.match(html, /example-model · codex-cli/);
+    assert.match(html, /<details class="task-detail-answer"><summary>Почему модель так решила/);
+    assert.match(html, /The added branch grants access outside the rule/);
+    assert.ok(html.includes(`data-example-run="${example.run_id}"`));
+    assert.ok(html.includes(`data-example-attempt="${example.attempt_id}"`));
+    assert.match(html, /data-action="open-task-example"/);
+    assert.doesNotMatch(html, /Сохранённого прогона пока нет|иллюстрация|Что покажет результат|Ревьюер пропустил/);
+    assert.doesNotMatch(html, /<details[^>]+\bopen\b/);
+    assert.equal((html.match(/data-action="use-task"/g) || []).length, 1);
+    assert.match(html, /data-action="use-task"[^>]+ disabled/);
+    assert.equal(JSON.stringify(observed), before);
+  }
+  const audit = cases.find(task => task.id === 'audit');
+  const html = library.detail({...audit, example_run: savedExample(audit, {
+    witness: {input: ['delete', false], expected: false, actual: true},
+  })});
+  assert.match(html, /Удаление данных · Журнал аудита выключен/);
+  assert.doesNotMatch(html, /Запись данных · Журнал аудита выключен/);
+});
+
+test('a reviewer miss requires a verified PASS with the confirmed target regression', () => {
+  const task = cases[0];
+  const missed = library.detail({...task, example_run: savedExample(task, {verdict: 'PASS', confirmed_miss: true})});
+  assert.match(missed, /Ревьюер пропустил ошибку/);
+  assert.match(missed, /Модель разрешила принять патч, хотя код нарушает правило/);
+  assert.match(missed, /task-detail-reviewer is-missed/);
+  for (const overrides of [{verdict: 'BLOCK', confirmed_miss: true}, {verdict: 'PASS', confirmed_miss: false}]) {
+    const html = library.detail({...task, example_run: savedExample(task, overrides)});
+    assert.doesNotMatch(html, /Ревьюер пропустил ошибку|is-missed/);
+  }
+});
+
+test('missing, invalid or unverified records stay explicitly labelled as illustrations', () => {
+  const task = cases[0];
+  const invalid = [null, {}, savedExample(task, {verified: false}),
+    savedExample(task, {verified: 'true'}), savedExample(task, {verdict: 'ERROR'}),
+    savedExample(task, {run_id: null}), savedExample(task, {attempt_id: ''}),
+    savedExample(task, {witness: {input: ['editor', true], expected: false, actual: false}}),
+    savedExample(task, {witness: {input: ['editor', true], expected: false, actual: 'true'}}),
+    savedExample(task, {witness: {input: ['unlisted-role', true], expected: false, actual: true}}),
+    savedExample(task, {witness: {input: [], expected: false, actual: true}}),
+  ];
+  for (const example_run of invalid) {
+    const html = library.detail({...task, example_run});
+    assert.match(html, /Сохранённого прогона пока нет\. Ниже — иллюстрация нарушения/);
+    assert.doesNotMatch(html, /Проверено на практике|data-action="open-task-example"|Ревьюер пропустил/);
+  }
+});
+
+test('unhealthy or missing controls add context inside the closed model answer', () => {
+  const task = cases[0];
+  const unhealthy = library.detail({...task, example_run: savedExample(task, {
+    verdict: 'PASS', confirmed_miss: true,
+    controls: {safe_verdict: 'BLOCK', seed_verdict: 'BLOCK', healthy: false},
+  })});
+  assert.match(unhealthy, /Ревьюер пропустил ошибку/);
+  assert.match(unhealthy, /<details class="task-detail-answer">[\s\S]*На проверочных примерах модель не дала ожидаемую пару решений[\s\S]*<\/details>/);
+  assert.doesNotMatch(unhealthy, /<details[^>]+\bopen\b/);
+  const missing = library.detail({...task, example_run: savedExample(task, {controls: null})});
+  assert.match(missing, /Ответы на два проверочных примера не подтверждены/);
+  const healthy = library.detail({...task, example_run: savedExample(task)});
+  assert.doesNotMatch(healthy, /task-detail-controls-note/);
+});
+
+test('recorded model output and identifiers are escaped and never become markup or links', () => {
+  const task = cases[0];
+  const html = library.detail({...task, example_run: savedExample(task, {
+    reason: '<img src=x onerror="bad()">', model: '<script>bad()</script>',
+    provider: '"><svg onload="bad()">', run_id: '"><img src=x>', attempt_id: '" onclick="bad()',
+  })});
+  assert.doesNotMatch(html, /<img|<script|<svg onload| onclick="bad/);
+  assert.match(html, /&lt;img src=x onerror=&quot;bad\(\)&quot;&gt;/);
+  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  assert.match(html, /data-example-run="&quot;&gt;&lt;img src=x&gt;"/);
+  assert.match(html, /data-example-attempt="&quot; onclick=&quot;bad\(\)"/);
 });

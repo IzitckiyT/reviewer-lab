@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .cases import CASES, Case
+from .case_examples import CaseExamples
 from .oracle import evaluate
 from .manual import check_source, load_series, validate_source
 from .report import summarize
@@ -113,6 +114,11 @@ class Dashboard:
         self.live_available = True
         self.provider_checks = {}
         self.provider_check_lock = threading.Lock()
+        self.case_examples = CaseExamples(self.runs)
+
+    def cases(self):
+        examples = self.case_examples.list()
+        return [{**case.ui(), "example_run": examples.get(case.id)} for case in CASES.values()]
 
     def providers(self):
         result = []
@@ -230,6 +236,7 @@ class Dashboard:
 
     def list_runs(self):
         found = []
+        saved_rows = {}
         for path in self.runs.glob("*"):
             if not path.is_dir() or not NAME.fullmatch(path.name):
                 continue
@@ -237,6 +244,7 @@ class Dashboard:
             if not manifest:
                 continue
             rows = self.rows(path)
+            saved_rows[path.name] = rows
             label = LABELS.get(path.name, path.name)
             if manifest.get("experiment_kind") == "manual":
                 case = CASES.get(next(iter(manifest.get("cases", [])), ""))
@@ -245,7 +253,32 @@ class Dashboard:
                 "execution_state": self.execution_state(path.name, manifest),
                 "manifest": manifest,
                 "summary": summarize(manifest, rows, journal(path / "calls.jsonl"))})
-        return sorted(found, key=lambda r: r["manifest"].get("created_at", ""), reverse=True)
+        # Publication copies replace their identical originals in the history
+        # only. Both directories and direct detail URLs remain available.
+        by_id = {entry["id"]: entry for entry in found}
+        hidden = set()
+        matching_fields = ("created_at", "cases", "models", "experiment_kind", "provider",
+                           "evidence", "modes", "repeats", "attempts_per_run", "source_sha256")
+        for entry in found:
+            manifest = entry["manifest"]
+            publication = manifest.get("publication")
+            if not isinstance(publication, dict):
+                continue
+            original_id = publication.get("copied_from_run")
+            if not isinstance(original_id, str) or original_id == entry["id"]:
+                continue
+            original = by_id.get(original_id)
+            if (not original or manifest.get("status") != "completed" or
+                    original["manifest"].get("status") != "completed" or
+                    original["execution_state"] == "owned_running" or
+                    entry["execution_state"] == "owned_running"):
+                continue
+            if (manifest.get("created_at") and saved_rows[original_id] and
+                    all(manifest.get(key) == original["manifest"].get(key) for key in matching_fields) and
+                    saved_rows[entry["id"]] == saved_rows[original_id]):
+                hidden.add(original_id)
+        return sorted((entry for entry in found if entry["id"] not in hidden),
+                      key=lambda r: r["manifest"].get("created_at", ""), reverse=True)
 
     def detail(self, run_id):
         path = self.run_path(run_id)
@@ -455,6 +488,8 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                           "/run-story.css": ("run-story.css", "text/css; charset=utf-8"),
                           "/task-library.js": ("task-library.js", "text/javascript; charset=utf-8"),
                           "/task-library.css": ("task-library.css", "text/css; charset=utf-8"),
+                          "/attack-story.js": ("attack-story.js", "text/javascript; charset=utf-8"),
+                          "/attack-story.css": ("attack-story.css", "text/css; charset=utf-8"),
                           "/navigation.css": ("navigation.css", "text/css; charset=utf-8"),
                           "/style.css": ("style.css", "text/css; charset=utf-8"),
                           "/fonts.css": ("fonts.css", "text/css; charset=utf-8"),
@@ -473,8 +508,7 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                         "active": app.active(), "featured": FEATURED,
                         "example": read_json(app.root / "examples" / "successful-owner-evidence.json"),
                         "launch_candidate": read_text(app.root / "examples" / "successful-owner-bypass.py", 20_000),
-                        "cases": [c.ui() if hasattr(c, "ui") else
-                                  {**c.public(), "seed": c.seed, "target": c.target} for c in CASES.values()]})
+                        "cases": app.cases()})
                 if path == "/api/providers":
                     return self.send(200, app.providers())
                 parts = path.strip("/").split("/")

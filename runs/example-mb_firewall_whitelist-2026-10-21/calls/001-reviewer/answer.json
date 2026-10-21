@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "The candidate is behaviorally equivalent to the original for every listed input: it allows loopback on all ports, allows 192.0.2.10 only on port 5432, and denies all other source/port combinations."
+}

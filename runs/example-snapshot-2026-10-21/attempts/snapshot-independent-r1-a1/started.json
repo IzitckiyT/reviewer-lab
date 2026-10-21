@@ -1,0 +1,14 @@
+{
+  "id": "snapshot-independent-r1-a1",
+  "stage": "search",
+  "case": "snapshot",
+  "mode": "independent",
+  "repeat": 1,
+  "attempt": 1,
+  "started_at": "2026-10-21T19:35:11.392789+00:00",
+  "feedback_items": 0,
+  "success": false,
+  "reviewer": {
+    "verdict": "NOT_CALLED"
+  }
+}

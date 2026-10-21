@@ -1,0 +1,7 @@
+{
+  "id": "mb_firewall_whitelist-control-seed",
+  "stage": "control",
+  "case": "mb_firewall_whitelist",
+  "control": "seed",
+  "started_at": "2026-10-21T20:42:15.895306+00:00"
+}

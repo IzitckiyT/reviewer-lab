@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate fails closed incorrectly: with whitelisted=false and default_policy=\"Drop\" (also \"drop\" or \"INVALID\"), it returns true because the value is not \"DROP\". Only the exact token \"ACCEPT\" may allow."
+}

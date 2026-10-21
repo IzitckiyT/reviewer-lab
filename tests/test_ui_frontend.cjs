@@ -47,7 +47,7 @@ function harness({respond, allowPost = false} = {}) {
       return {ok: true, json: async () => value};
     },
   });
-  for (const file of ['case-copy.js', 'test-explanation.js', 'provider-setup.js', 'run-story.js', 'task-library.js']) {
+  for (const file of ['case-copy.js', 'test-explanation.js', 'provider-setup.js', 'run-story.js', 'task-library.js', 'attack-story.js']) {
     const helper = path.join(__dirname, '..', 'ui', file);
     if (fs.existsSync(helper)) vm.runInContext(fs.readFileSync(helper, 'utf8'), context, {filename: 'ui/' + file});
   }
@@ -491,7 +491,8 @@ test('row drill-in and back use a read-only fixture and preserve list filters', 
   await h.click({run: 'alpha'});
   assert.equal(h.run('state.runOpen'), true);
   assert.equal(h.run('location.hash'), '#runs/alpha');
-  assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY|SAVED_REVIEWER_REASON/);
+  assert.doesNotMatch(h.run('attemptRecords(state.details.get(state.run))'), /CANDIDATE_ONLY|SAVED_REVIEWER_REASON/);
+  assert.match(h.node('#main').innerHTML, /Как развивалась атака/);
   assert.match(h.node('#main').innerHTML, /data-attempt="owner-independent-r1-a1"/);
   assert.match(h.node('#main').innerHTML, /data-action="close-run"/);
   assert.deepEqual(h.requests, ['/api/runs/alpha']);
@@ -514,7 +515,7 @@ test('attempt details start closed and each action expands only its selected att
   const data = prepareRun(h, rows);
   h.run('renderRuns()');
   assert.equal(h.run('state.attemptOpen'), false);
-  assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY|SECOND_SOURCE|SAVED_REVIEWER_REASON|SECOND_REASON|aria-expanded="true"/);
+  assert.doesNotMatch(h.run('attemptRecords(state.details.get(state.run))'), /CANDIDATE_ONLY|SECOND_SOURCE|SAVED_REVIEWER_REASON|SECOND_REASON|aria-expanded="true"/);
   await h.click({attempt: rows[0].id, openTab: 'source'});
   assert.equal(h.run('state.attemptOpen'), true);
   assert.match(h.node('#attempt-records').innerHTML, /CANDIDATE_ONLY/);
@@ -1959,4 +1960,158 @@ test('unknown task deep links stay safe and ordinary catalogue navigation never 
   await h.click({action:'task-library-back'});
   assert.equal(h.run('state.launchCase'),'audit');
   assert.deepEqual(h.requests,[]);
+});
+
+test('a verified task example opens the exact saved run and attempt with one read-only request',async()=>{
+  const selected=attempt({id:'saved-example-attempt',reviewer:{verdict:'BLOCK',reason:'SAVED_EXAMPLE_REASON'},success:false});
+  const other=attempt({id:'another-attempt',attempt:2,source:'OTHER_CANDIDATE'});
+  const saved={...detail,id:'saved-example-run',manifest:{...detail.manifest,status:'completed',cases:['owner']},rows:[selected,other],calls:[]};
+  const h=harness({respond:url=>{assert.equal(url,'/api/runs/'+saved.id);return saved;}});
+  h.run('state.view="tasks";state.taskId="owner";state.data.cases=[{...chooserCases[0],example_run:{verified:true,run_id:saved.id,attempt_id:selected.id}}]',{chooserCases,saved,selected});
+  await h.click({action:'open-task-example',exampleRun:saved.id,exampleAttempt:selected.id});
+  assert.equal(h.run('state.view'),'runs');
+  assert.equal(h.run('state.run'),saved.id);
+  assert.equal(h.run('state.attempt'),selected.id);
+  assert.equal(h.run('state.attemptOpen'),true);
+  assert.equal(h.run('location.hash'),'#runs/'+saved.id);
+  assert.match(h.node('#main').innerHTML,/data-story-attempt="saved-example-attempt"[^>]* open/);
+  assert.match(h.node('#main').innerHTML,/SAVED_EXAMPLE_REASON/);
+  assert.deepEqual(h.requests,['/api/runs/'+saved.id]);
+});
+
+test('stale, unverified or mismatched task example references cannot change the current page',async()=>{
+  const h=harness();
+  h.run('state.view="tasks";state.taskId="owner";state.data.cases=[{...chooserCases[0],example_run:{verified:true,run_id:"trusted-run",attempt_id:"trusted-attempt"}}]',{chooserCases});
+  for(const reference of [
+    {exampleRun:'untrusted-run',exampleAttempt:'trusted-attempt'},
+    {exampleRun:'trusted-run',exampleAttempt:'stale-attempt'},
+    {exampleRun:'../../api/launch',exampleAttempt:'trusted-attempt'},
+    {exampleRun:'',exampleAttempt:''},
+  ])await h.click({action:'open-task-example',...reference});
+  h.run('state.data.cases[0].example_run.verified=false');
+  await h.click({action:'open-task-example',exampleRun:'trusted-run',exampleAttempt:'trusted-attempt'});
+  assert.equal(h.run('state.view'),'tasks');
+  assert.equal(h.run('state.taskId'),'owner');
+  assert.equal(h.run('state.run'),null);
+  assert.deepEqual(h.requests,[]);
+  const mismatched=harness({respond:()=>({...detail,id:'trusted-run',rows:[attempt({id:'trusted-attempt',case:'audit'})]})});
+  mismatched.run('state.view="tasks";state.taskId="owner";state.data.cases=[{...chooserCases[0],example_run:{verified:true,run_id:"trusted-run",attempt_id:"trusted-attempt"}}]',{chooserCases});
+  await mismatched.click({action:'open-task-example',exampleRun:'trusted-run',exampleAttempt:'trusted-attempt'});
+  assert.equal(mismatched.run('state.view'),'tasks');
+  assert.equal(mismatched.run('state.run'),null);
+  assert.deepEqual(mismatched.requests,['/api/runs/trusted-run']);
+});
+
+test('opening a recorded example closes the task chooser and preserves the prepared launch',async()=>{
+  const row=attempt(),saved={...detail,id:'chooser-example-run',manifest:{...detail.manifest,status:'completed',cases:['owner']},rows:[row],calls:[]};
+  const h=harness({respond:url=>{assert.equal(url,'/api/runs/'+saved.id);return saved;}});
+  const values={preset:'compare',case:'snapshot',attempts:'4',repeats:'2',effort:'low',attacker_model:'my-generator',provider:'claude',reviewer_model:'opus'};
+  launchFields(h,values);
+  h.run('state.data.cases=chooserCases.map(c=>c.id==="owner"?{...c,example_run:{verified:true,run_id:saved.id,attempt_id:row.id}}:c);state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="opus";state.view="launch";renderLaunch()',{chooserCases,saved,row,fixtures:providerFixtures});
+  await h.click({action:'task-details',taskId:'owner',context:'launch'});
+  assert.equal(h.node('#case-dialog').open,true);
+  await h.click({action:'open-task-example',exampleRun:saved.id,exampleAttempt:row.id});
+  assert.equal(h.node('#case-dialog').open,false);
+  assert.equal(h.run('state.casePicker'),null);
+  assert.equal(h.run('state.launchCase'),'snapshot');
+  const restored=launchFields(h,{provider:'claude',reviewer_model:'opus',attacker_model:'default-generator'});
+  await h.click({view:'launch'});
+  for(const name of ['preset','case','attempts','repeats','effort','attacker_model'])assert.equal(restored[name].value,values[name],name);
+  assert.equal(h.run('state.providerId'),'claude');
+  assert.equal(h.run('reviewerValue()'),'opus');
+  assert.deepEqual(h.requests,['/api/runs/'+saved.id]);
+});
+
+test('a saved example arriving during polling preserves the task source explanation already open',async()=>{
+  const task={...chooserCases.find(c=>c.id==='audit'),domains:[['read','list','write','delete'],[false,true]]};
+  const observed={...task,example_run:{verified:true,run_id:'new-audit-run',attempt_id:'audit-1',verdict:'BLOCK',reason:'ACTUAL_AUDIT_REASON',model:'saved-model',provider:'codex',confirmed_miss:false,witness:{input:['write',false],expected:false,actual:true},checked_count:8,controls:{healthy:true}}};
+  const h=harness({respond:url=>{assert.equal(url,'/api/state');return {runs:[],cases:[observed],active:{running:false}};}});
+  h.run('state.data.cases=[task];state.view="tasks";state.taskId="audit";renderTasks()',{task});
+  const page=h.node('#main');
+  const disclosure=(label,open=false)=>({open,querySelector:()=>({textContent:label})});
+  let disclosures=[disclosure('Как устроена задача',true)];
+  let markup=page.innerHTML;
+  Object.defineProperty(page,'innerHTML',{configurable:true,get:()=>markup,set:value=>{
+    markup=value;disclosures=[disclosure('Почему модель так решила'),disclosure('Как устроена задача')];
+  }});
+  page.querySelectorAll=selector=>selector==='details[open]'?disclosures.filter(item=>item.open):selector==='details'?disclosures:[];
+  await h.run('pollOnce()');
+  assert.match(page.innerHTML,/Проверено на практике/);
+  assert.match(page.innerHTML,/ACTUAL_AUDIT_REASON/);
+  assert.equal(disclosures.find(item=>item.querySelector().textContent==='Как устроена задача').open,true);
+  assert.equal(disclosures.find(item=>item.querySelector().textContent==='Почему модель так решила').open,false);
+  assert.equal(h.run('state.taskId'),'audit');
+  assert.deepEqual(h.requests,['/api/state']);
+});
+
+test('polling appends the actual attack and answer without losing the open earlier version',async()=>{
+  const first=attempt({id:'feedback-1',mode:'feedback',feedback_items:0,source:'FIRST_SAVED_CODE',success:false,reviewer:{verdict:'BLOCK',reason:'FIRST_SAVED_REASON'}});
+  const second=attempt({id:'feedback-2',attempt:2,mode:'feedback',feedback_items:1,source:'SECOND_SAVED_CODE',reviewer:{verdict:'PASS',reason:'SECOND_SAVED_REASON'}});
+  const manifest={...detail.manifest,status:'running',cases:['owner'],experiment_kind:'attack_search'};
+  const completed={...detail,id:'live-attack-run',manifest:{...manifest,status:'completed'},rows:[first,second],calls:[]};
+  const h=harness({respond:url=>{
+    if(url==='/api/state')return {runs:[],cases:chooserCases,active:{id:completed.id,running:false}};
+    assert.equal(url,'/api/runs/'+completed.id);return completed;
+  }});
+  const initial={...completed,manifest,rows:[first]};
+  h.run('state.view="runs";state.run=initial.id;state.runOpen=true;state.details.set(initial.id,initial);state.data.active={id:initial.id,running:true};renderRuns()',{initial});
+  const story=h.node('#attack-story-slot');
+  const disclosure=(key,open=false)=>({dataset:{attackKey:key},open,querySelector:()=>({textContent:key})});
+  let disclosures=[disclosure('iteration:feedback-1',true),disclosure('source:feedback-1',true)];
+  let codes=[{textContent:'FIRST_SAVED_CODE',scrollTop:31,scrollLeft:12}];
+  let markup=h.run('attackStory(initial)',{initial});
+  Object.defineProperty(story,'innerHTML',{configurable:true,get:()=>markup,set:value=>{
+    markup=value;disclosures=[disclosure('iteration:feedback-1'),disclosure('source:feedback-1'),disclosure('iteration:feedback-2',true),disclosure('source:feedback-2')];
+    codes=[{textContent:'FIRST_SAVED_CODE',scrollTop:0,scrollLeft:0},{textContent:'SECOND_SAVED_CODE',scrollTop:0,scrollLeft:0}];
+  }});
+  story.querySelectorAll=selector=>selector==='details'?disclosures:selector==='pre'?codes:[];
+  await h.run('pollOnce()');
+  assert.match(story.innerHTML,/data-story-attempt="feedback-2"/);
+  assert.match(story.innerHTML,/SECOND_SAVED_CODE/);
+  assert.match(story.innerHTML,/SECOND_SAVED_REASON/);
+  assert.match(story.innerHTML,/Предыдущий результат, доступный атакующему[^]*FIRST_SAVED_REASON/);
+  assert.match(story.innerHTML,/Ошибка прошла ревью/);
+  assert.equal(disclosures.find(item=>item.dataset.attackKey==='source:feedback-1').open,true);
+  assert.equal(disclosures.find(item=>item.dataset.attackKey==='iteration:feedback-2').open,false,'new results must not take over an earlier version being read');
+  assert.deepEqual([codes[0].scrollTop,codes[0].scrollLeft],[31,12]);
+  assert.deepEqual(h.requests,['/api/state','/api/runs/'+completed.id]);
+});
+
+test('a late saved-example response does not interrupt navigation to another page',async()=>{
+  const row=attempt(),saved={...detail,id:'slow-example',rows:[row],calls:[]};
+  let resolveResponse;
+  const h=harness({respond:()=>new Promise(resolve=>{resolveResponse=resolve;})});
+  h.run('state.view="tasks";state.taskId="owner";state.data.cases=[{...chooserCases[0],example_run:{verified:true,run_id:saved.id,attempt_id:row.id}}]',{chooserCases,saved,row});
+  const pending=h.click({action:'open-task-example',exampleRun:saved.id,exampleAttempt:row.id});
+  await h.click({view:'runs'});
+  resolveResponse(saved);await pending;
+  assert.equal(h.run('state.view'),'runs');
+  assert.equal(h.run('state.runOpen'),false);
+  assert.equal(h.run('location.hash'),'#runs');
+  assert.deepEqual(h.requests,['/api/runs/slow-example']);
+});
+
+test('an exact example opens its code in a simple screening while normal screening stays compact',async()=>{
+  const row=attempt({id:'one-screen'}),saved={...detail,id:'simple-example',manifest:{...detail.manifest,experiment_kind:'candidate_screen',cases:['owner'],attempts_per_run:1,repeats:1,modes:['independent'],status:'completed'},rows:[row],calls:[]};
+  const h=harness({respond:()=>saved});
+  h.run('state.data.cases=[{...chooserCases[0],example_run:{verified:true,run_id:saved.id,attempt_id:row.id}}];state.view="tasks"',{chooserCases,saved,row});
+  await h.click({action:'open-task-example',exampleRun:saved.id,exampleAttempt:row.id});
+  assert.match(h.node('#main').innerHTML,/data-story-attempt="one-screen"[^>]* open/);
+  h.run('resetAttemptBrowser();renderRuns()');
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-story-attempt="one-screen"[^>]* open/);
+  assert.match(h.node('#main').innerHTML,/Атакующий не участвовал/);
+  assert.deepEqual(h.requests,['/api/runs/simple-example']);
+});
+
+test('the finished banner describes the chosen successful example rather than a later rejected repeat',async()=>{
+  const winner=attempt({id:'chosen-winner',repeat:2}),later=attempt({id:'later-block',repeat:3,success:false,reviewer:{verdict:'BLOCK',reason:'LATER_REASON'}});
+  const saved={...detail,id:'repeat-example',manifest:{...detail.manifest,status:'completed',cases:['owner'],repeats:3},rows:[winner,later],calls:[]};
+  const h=harness({respond:()=>saved});
+  h.run('state.view="tasks";state.data.cases=[{...chooserCases[0],example_run:{verified:true,run_id:saved.id,attempt_id:winner.id}}]',{chooserCases,saved,winner});
+  await h.click({action:'open-task-example',exampleRun:saved.id,exampleAttempt:winner.id});
+  const page=h.node('#main').innerHTML;
+  const banner=page.slice(page.indexOf('aria-label="Результат запуска"'),page.indexOf('<section class="experiment-detail">'));
+  assert.match(banner,/Выбранная попытка · серия 2 · 1/);
+  assert.match(banner,/Модель пропустила ошибку/);
+  assert.doesNotMatch(banner,/Патч отклонён|LATER_REASON|Последняя попытка/);
 });

@@ -1,0 +1,7 @@
+{
+  "id": "mb_firewall_policy-control-seed",
+  "stage": "control",
+  "case": "mb_firewall_policy",
+  "control": "seed",
+  "started_at": "2026-10-21T20:42:31.928394+00:00"
+}

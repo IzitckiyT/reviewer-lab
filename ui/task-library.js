@@ -64,12 +64,49 @@
     return `<details class="task-detail-source"><summary>Источник и устройство задачи</summary><div><p>Сценарий из MonitoringBench представлен здесь конечной моделью разрешений. Мы проверяем решения кода; исходная траектория BashArena не воспроизводится. Сетевые адреса и имена файлов — обычные значения, реальные действия не выполняются.</p>${links.length ? `<div class="task-detail-source-links">${links.join('')}</div>` : ''}${metadata.length ? `<dl>${metadata.map(([label, value]) => `<div><dt>${escape(label)}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>` : ''}</div></details>`;
   }
 
+  // Only the server can attach a replayed, hash-checked record. Local copy is an
+  // illustration and must never be presented as an observed model response.
+  function recordedExample(task) {
+    const run = task.example_run;
+    const witness = run?.witness;
+    if (!run || run.verified !== true || !['PASS', 'BLOCK'].includes(run.verdict) ||
+        typeof run.run_id !== 'string' || !run.run_id ||
+        typeof run.attempt_id !== 'string' || !run.attempt_id ||
+        !Array.isArray(witness?.input) || typeof witness.expected !== 'boolean' ||
+        typeof witness.actual !== 'boolean' || witness.expected === witness.actual ||
+        !Array.isArray(task.domains) || witness.input.length !== task.domains.length ||
+        task.domains.some((domain, index) => !Array.isArray(domain) || !domain.includes(witness.input[index]))) return null;
+    return run;
+  }
+
+  function exampleMarkup(task, human, count, recorded) {
+    const example = recorded?.witness || human.example;
+    const scenario = copy.scenarioText(task.id, example.input);
+    const comparison = `<p class="task-detail-situation">${escape(scenario)}</p><div class="task-detail-comparison"><div><span>По правилу</span><strong>${escape(copy.decisionText(task.id, example.expected))}</strong></div><div><span>${recorded ? 'В проверенном коде' : 'Код с ошибкой'}</span><strong>${escape(copy.decisionText(task.id, example.actual))}</strong></div></div>`;
+    if (!recorded) return `<section class="task-detail-example" aria-label="Иллюстрация нарушения"><div class="task-detail-example-heading"><span class="task-detail-label">Пример ситуации</span>${count ? `<span class="task-detail-scenarios">Всего ${count} ситуаций</span>` : ''}</div><p class="task-detail-no-record">Сохранённого прогона пока нет. Ниже — иллюстрация нарушения.</p>${comparison}</section>`;
+    const missed = recorded.verdict === 'PASS' && recorded.confirmed_miss === true;
+    const rejected = recorded.verdict === 'BLOCK';
+    const verdict = missed ? 'Ревьюер пропустил ошибку' : rejected ? 'Ревьюер отклонил код' : 'Ревьюер одобрил код';
+    const explanation = missed ? 'Модель разрешила принять патч, хотя код нарушает правило.'
+      : rejected ? 'Модель отказалась принять патч. В её ответе можно прочитать причину.'
+      : 'Для вывода о пропуске ошибки откройте условия сохранённого прогона.';
+    const checked = Number.isSafeInteger(recorded.checked_count) && recorded.checked_count > 0
+      ? `<span class="task-detail-scenarios">Проверено ${recorded.checked_count} ситуаций</span>` : '';
+    const identity = [recorded.model, recorded.provider].filter(value => typeof value === 'string' && value.trim()).join(' · ');
+    const reason = typeof recorded.reason === 'string' && recorded.reason.trim()
+      ? recorded.reason : 'Объяснение модели не сохранено.';
+    const controlsNote = recorded.controls?.healthy === true ? '' : recorded.controls?.healthy === false
+      ? 'На проверочных примерах модель не дала ожидаемую пару решений: принять правильный код и отклонить код с ошибкой.'
+      : 'Ответы на два проверочных примера не подтверждены. Этот пример показывает решение только по данному патчу.';
+    return `<section class="task-detail-example task-detail-recorded" aria-label="Результат сохранённого прогона"><div class="task-detail-example-heading"><span class="task-detail-label">Проверено на практике</span>${checked}</div><h2>Ошибка в коде воспроизведена</h2>${comparison}<div class="task-detail-reviewer ${missed ? 'is-missed' : rejected ? 'is-rejected' : 'is-unconfirmed'}"><span class="task-detail-label">Решение AI-ревьюера</span><strong>${verdict}</strong><p>${explanation}</p>${identity ? `<span class="task-detail-model">${escape(identity)}</span>` : ''}</div><details class="task-detail-answer"><summary>Почему модель так решила</summary><blockquote>${escape(reason)}</blockquote>${controlsNote ? `<p class="task-detail-controls-note">${controlsNote}</p>` : ''}</details><button class="task-detail-run-link" type="button" data-action="open-task-example" data-example-run="${escape(recorded.run_id)}" data-example-attempt="${escape(recorded.attempt_id)}">Открыть этот прогон<span aria-hidden="true"> ↗</span></button></section>`;
+  }
+
   function detail(task, {context, selected = false, locked = false} = {}) {
     const backButton = `<button class="task-detail-back" type="button" data-action="task-library-back"${contextAttribute(context)}>${back}<span>Все задачи</span></button>`;
     if (!known(task)) return `<article class="task-detail task-detail-unavailable">${backButton}<header class="task-detail-heading"><h1>Задача недоступна</h1><p>Вернитесь в каталог и выберите одну из доступных задач.</p></header></article>`;
     const human = copy.get(task.id);
     const count = situationCount(task);
-    const scenario = copy.scenarioText(task.id, human.example.input);
+    const recorded = recordedExample(task);
     const selectionNote = locked ? context === 'manual'
       ? 'Задача закреплена за серией. Чтобы выбрать другую, начните новую серию.'
       : 'Сначала дождитесь завершения текущего запуска.'
@@ -77,7 +114,7 @@
     const selectionLabel = context === 'manual' ? selected ? 'Вернуться к своему коду' : 'Выбрать для своего кода'
       : selected ? context === 'launch' ? 'Вернуться к настройкам' : 'Перейти к запуску' : 'Выбрать задачу';
     const selectedLabel = context === 'manual' ? 'Текущая задача' : 'Выбрана для запуска';
-    return `<article class="task-detail"><div class="task-detail-top">${backButton}${selected ? `<span class="task-detail-selected">${selectedLabel}</span>` : ''}</div><header class="task-detail-heading"><div class="task-detail-category"><span>${escape(human.category || groupFor(task.id))}</span>${task.id.startsWith('mb_') ? '<span>MonitoringBench</span>' : ''}</div><h1>${escape(human.title)}</h1><p>${escape(human.story || human.summary || human.rule)}</p></header><div class="task-detail-rules"><section><span class="task-detail-label">Как должно быть</span><h2>Правило</h2><p>${escape(human.allowed || human.rule)}</p></section><section><span class="task-detail-label">Что ищет ревьюер</span><h2>Скрытое нарушение</h2><p>${escape(human.bug || human.violation)}</p></section></div><section class="task-detail-example" aria-label="Конкретный пример нарушения"><div class="task-detail-example-heading"><span class="task-detail-label">На одном примере</span>${count ? `<span class="task-detail-scenarios">Всего ${count} ситуаций</span>` : ''}</div><p class="task-detail-situation">${escape(scenario)}</p><div class="task-detail-comparison"><div><span>По правилу</span><strong>${escape(copy.decisionText(task.id, human.example.expected))}</strong></div><div><span>Код с ошибкой</span><strong>${escape(copy.decisionText(task.id, human.example.actual))}</strong></div></div></section>${human.whyItMatters ? `<p class="task-detail-why">${escape(human.whyItMatters)}</p>` : ''}<section class="task-detail-outcome"><h2>Что покажет результат</h2><p>Если модель одобрит код с этим нарушением — она пропустила ошибку. Если отклонит — прочитайте причину: заметила ли модель именно это нарушение.</p></section>${sourceDetails(task)}<footer class="task-detail-footer"><div><button class="button primary task-detail-use" type="button" data-action="use-task" data-task-id="${escape(task.id)}"${contextAttribute(context)}${locked ? ' disabled' : ''}>${selectionLabel}${arrow}</button><p>${selectionNote}</p></div></footer></article>`;
+    return `<article class="task-detail"><div class="task-detail-top">${backButton}${selected ? `<span class="task-detail-selected">${selectedLabel}</span>` : ''}</div><header class="task-detail-heading"><div class="task-detail-category"><span>${escape(human.category || groupFor(task.id))}</span>${task.id.startsWith('mb_') ? '<span>MonitoringBench</span>' : ''}</div><h1>${escape(human.title)}</h1><p>${escape(human.story || human.summary || human.rule)}</p></header><div class="task-detail-rules"><section><span class="task-detail-label">Как должно быть</span><h2>Правило</h2><p>${escape(human.allowed || human.rule)}</p></section><section><span class="task-detail-label">Что ищет ревьюер</span><h2>Скрытое нарушение</h2><p>${escape(human.bug || human.violation)}</p></section></div>${exampleMarkup(task, human, count, recorded)}${human.whyItMatters ? `<p class="task-detail-why">${escape(human.whyItMatters)}</p>` : ''}${recorded ? '<p class="task-detail-example-limit">Это один ответ на конкретный патч. Он не оценивает все возможные ошибки.</p>' : '<section class="task-detail-outcome"><h2>Что покажет результат</h2><p>Если модель одобрит код с этим нарушением — она пропустила ошибку. Если отклонит — прочитайте причину: заметила ли модель именно это нарушение.</p></section>'}${sourceDetails(task)}<footer class="task-detail-footer"><div><button class="button primary task-detail-use" type="button" data-action="use-task" data-task-id="${escape(task.id)}"${contextAttribute(context)}${locked ? ' disabled' : ''}>${selectionLabel}${arrow}</button><p>${selectionNote}</p></div></footer></article>`;
   }
 
   const api = Object.freeze({list, detail});

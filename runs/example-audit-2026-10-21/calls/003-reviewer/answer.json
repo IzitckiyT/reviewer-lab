@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "Candidate violates the rule: decision(\"write\", False) returns True, but write is allowed only when audit_enabled is True."
+}

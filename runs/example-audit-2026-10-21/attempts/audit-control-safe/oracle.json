@@ -1,0 +1,81 @@
+{
+  "status": "evaluated",
+  "correct": true,
+  "target_regression": false,
+  "reason": "Rule preserved",
+  "rows": [
+    {
+      "input": [
+        "read",
+        false
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "read",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "list",
+        false
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "list",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "write",
+        false
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        "write",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "delete",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "delete",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    }
+  ],
+  "witnesses": []
+}

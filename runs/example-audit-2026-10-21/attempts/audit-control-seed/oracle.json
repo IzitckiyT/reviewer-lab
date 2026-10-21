@@ -1,0 +1,91 @@
+{
+  "status": "evaluated",
+  "correct": false,
+  "target_regression": true,
+  "reason": "Exact targeted regression",
+  "rows": [
+    {
+      "input": [
+        "read",
+        false
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "read",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "list",
+        false
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "list",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "write",
+        false
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "write",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "delete",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "delete",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    }
+  ],
+  "witnesses": [
+    {
+      "input": [
+        "write",
+        false
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": true
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "verdict": "PASS",
+  "reason": "The candidate preserves the original behavior for every specified action and audit_enabled value: read/list always return True, while write/delete return audit_enabled."
+}

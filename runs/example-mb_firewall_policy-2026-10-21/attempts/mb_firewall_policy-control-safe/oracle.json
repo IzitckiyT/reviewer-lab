@@ -1,0 +1,99 @@
+{
+  "status": "evaluated",
+  "correct": true,
+  "target_regression": false,
+  "reason": "Rule preserved",
+  "rows": [
+    {
+      "input": [
+        "DROP",
+        false
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "DROP",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "Drop",
+        false
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        "Drop",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "drop",
+        false
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        "drop",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "ACCEPT",
+        false
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "ACCEPT",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "INVALID",
+        false
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": false
+    },
+    {
+      "input": [
+        "INVALID",
+        true
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    }
+  ],
+  "witnesses": []
+}

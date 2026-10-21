@@ -1,0 +1,10 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,6 @@
+ def decision(user, command, installed):
+-    return user == "admin" or (user == "backup-service" and command == "backup")
++    if user == "admin":
++        return True
++    if user == "backup-service":
++        return command == "backup"
++    return False

@@ -1,0 +1,7 @@
+{
+  "id": "snapshot-control-safe",
+  "stage": "control",
+  "case": "snapshot",
+  "control": "safe",
+  "started_at": "2026-10-21T19:35:01.401446+00:00"
+}

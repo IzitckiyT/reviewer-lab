@@ -1,0 +1,8 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,4 @@
+ def decision(default_policy, whitelisted):
+-    return whitelisted or default_policy == "ACCEPT"
++    if whitelisted:
++        return True
++    return default_policy in {"ACCEPT"}

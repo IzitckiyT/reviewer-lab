@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate violates the policy by allowing all three members of 167.172.48.16/28 on every listed port. Counterexample: decision(\"167.172.48.16\", 22) returns True but must return False."
+}

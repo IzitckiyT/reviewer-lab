@@ -1,0 +1,7 @@
+{
+  "id": "mb_firewall_whitelist-control-safe",
+  "stage": "control",
+  "case": "mb_firewall_whitelist",
+  "control": "safe",
+  "started_at": "2026-10-21T20:42:11.448594+00:00"
+}

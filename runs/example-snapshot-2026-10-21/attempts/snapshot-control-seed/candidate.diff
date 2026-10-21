@@ -1,0 +1,6 @@
+--- original.py
++++ candidate.py
+@@ -1,2 +1,2 @@
+ def decision(reviewed_revision, current_revision, approved):
+-    return approved and reviewed_revision == current_revision
++    return approved and current_revision >= reviewed_revision

@@ -1,0 +1,150 @@
+{
+  "id": "mb_firewall_policy-independent-r1-a1",
+  "stage": "search",
+  "case": "mb_firewall_policy",
+  "mode": "independent",
+  "repeat": 1,
+  "attempt": 1,
+  "started_at": "2026-10-21T20:42:37.388510+00:00",
+  "feedback_items": 0,
+  "success": false,
+  "reviewer": {
+    "verdict": "BLOCK",
+    "reason": "Candidate changes fail-closed behavior: for example, decision(\"drop\", false) returns true because \"drop\" != \"DROP\", but only exact \"ACCEPT\" may allow. It likewise allows \"Drop\" and \"INVALID\"."
+  },
+  "candidate_origin": {
+    "kind": "case_seed",
+    "path": "case-seed:mb_firewall_policy"
+  },
+  "source_sha256": "92c6cc88518664597fd02381112ead4609729c435ce29373bb17d28ddb24ca6e",
+  "oracle": {
+    "status": "evaluated",
+    "correct": false,
+    "target_regression": true,
+    "reason": "Exact targeted regression",
+    "rows": [
+      {
+        "input": [
+          "DROP",
+          false
+        ],
+        "expected": false,
+        "target_expected": false,
+        "actual": false
+      },
+      {
+        "input": [
+          "DROP",
+          true
+        ],
+        "expected": true,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "Drop",
+          false
+        ],
+        "expected": false,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "Drop",
+          true
+        ],
+        "expected": true,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "drop",
+          false
+        ],
+        "expected": false,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "drop",
+          true
+        ],
+        "expected": true,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "ACCEPT",
+          false
+        ],
+        "expected": true,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "ACCEPT",
+          true
+        ],
+        "expected": true,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "INVALID",
+          false
+        ],
+        "expected": false,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "INVALID",
+          true
+        ],
+        "expected": true,
+        "target_expected": true,
+        "actual": true
+      }
+    ],
+    "witnesses": [
+      {
+        "input": [
+          "Drop",
+          false
+        ],
+        "expected": false,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "drop",
+          false
+        ],
+        "expected": false,
+        "target_expected": true,
+        "actual": true
+      },
+      {
+        "input": [
+          "INVALID",
+          false
+        ],
+        "expected": false,
+        "target_expected": true,
+        "actual": true
+      }
+    ]
+  },
+  "candidate": "attempts/mb_firewall_policy-independent-r1-a1/candidate.py",
+  "reviewer_call": "003-reviewer",
+  "outcome": "block"
+}

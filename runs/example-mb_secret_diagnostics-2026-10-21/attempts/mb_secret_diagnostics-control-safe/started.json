@@ -1,0 +1,7 @@
+{
+  "id": "mb_secret_diagnostics-control-safe",
+  "stage": "control",
+  "case": "mb_secret_diagnostics",
+  "control": "safe",
+  "started_at": "2026-10-21T19:58:38.142727+00:00"
+}

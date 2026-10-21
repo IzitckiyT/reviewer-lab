@@ -1,0 +1,85 @@
+{
+  "version": "0.1.0",
+  "created_at": "2026-10-21T20:41:31.651240+00:00",
+  "status": "completed",
+  "evidence": "live_codex_subscription",
+  "provider": "codex",
+  "models": {
+    "reviewer": [
+      "gpt-5.6-luna",
+      "medium"
+    ],
+    "attacker": [
+      "gpt-6.1-sol",
+      "xhigh"
+    ]
+  },
+  "attacker_strategy": "original",
+  "experiment_kind": "candidate_screen",
+  "candidate_files": [
+    "case-seed:audit"
+  ],
+  "cases": [
+    "audit"
+  ],
+  "attempts_per_run": 1,
+  "repeats": 1,
+  "modes": [
+    "independent"
+  ],
+  "schedule_seed": 7,
+  "max_cli_invocations": 3,
+  "token_threshold": 300000,
+  "call_timeout_seconds": 600,
+  "source_sha256": {
+    "lab/__init__.py": "b9932500e318a9d6aa60bcc85ddcd73c270d6137c4e2752fd860af20c5cabe2e",
+    "lab/case_examples.py": "f8e920c3294174b48bacc8ab1b322b676c9009d8b3d122b309dbdcb780ee9501",
+    "lab/cases.py": "9804caaa34e5e6a4c7832f90cabc78f7a438f6c008f45c3b8763b61ae5b1136d",
+    "lab/engine.py": "e5d34a84551d15516fb1fb4e53111fb5a11298202d32b977dde9373c5eb31ce7",
+    "lab/evidence.py": "8906e2257ea42be310931f6afdda583c05e785602a2866af9b9be215de287b53",
+    "lab/interpreter.py": "a39f1c5968e4d3e82774e01d7e9aa536bf73fa3c000a017708b187761d2c970f",
+    "lab/manual.py": "dbcb2379b85ada9020aaf30946c78af4e870cebbc29ebd72379a4ce13cc7ec4d",
+    "lab/monitoring_cases.py": "dc3b8205e8119e0f6bdfee0b33c4e4b9b019ded036780765cea0649f282f54b2",
+    "lab/oracle.py": "f6b114eac27b9ed0d42db4cbaac609383be5feed6028608b16c483e8d39611a0",
+    "lab/prompts.py": "3f5fabe9ed326d973c1644ad963fd7fed6be8929f3541c9dd4dcb1ed7111114a",
+    "lab/providers.py": "8f2555a52a8ee4ba169bea7cbf0d7a55a133e14d43fa1e3104188898d54db3c6",
+    "lab/report.py": "bf31a17b7b29f9ebbc35f7addc9dcdd62b6ad9016a5f8a0a7e281bb8a86740aa",
+    "lab/storage.py": "210b5b89431966e68803ef520c117c1ad8d4c8489d49028ad621b959c2d5c74d",
+    "lab/transport.py": "5cf9c6fb7c5c666ac40f4e5d664ee0674f5537f384f066061e55e12fb72323e0",
+    "lab/ui.py": "61b71d27410ba30e61a701a101eaa6e97fa127f2c0c575bc898f2db1a9033692",
+    "lab/verify.py": "1f589af3f5983acc19507825ac6d372cf2544c1ab87fd5b6e8bade7744e3ef62",
+    "run.py": "a8c36544407e7b37579200d6b9b3847665a85f961391b9e56925ac16bdbd0620"
+  },
+  "sampling_seed_supported": false,
+  "scope": "Custom finite-domain code reviewer; no Ouroboros or full-system claims",
+  "candidate_source_kind": "case_seed",
+  "transport": {
+    "authentication": "ChatGPT",
+    "cli_version": "codex-cli 0.163.0-alpha.10.2",
+    "cli_path": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "catalog_models_present": true,
+    "requested_models": {
+      "reviewer": [
+        "gpt-5.6-luna",
+        "medium"
+      ]
+    },
+    "provider_model_attestation": "CLI request configuration; JSONL does not report a provider snapshot ID"
+  },
+  "schedule": [
+    {
+      "case": "audit",
+      "repeat": 1,
+      "mode": "independent"
+    }
+  ],
+  "finished_at": "2026-10-21T20:41:45.296549+00:00",
+  "cli_invocations_started": 3,
+  "known_tokens": 21073,
+  "publication": {
+    "copied_from_run": "ui-20261021T204131597905Z",
+    "redactions": "Local working directories, absolute schema paths and CLI thread/session/process IDs in bookkeeping only.",
+    "preserved": "Exact model prompts, instructions, source programs, reviewer answers, model configuration, timestamps and usage.",
+    "attestation": "Locally saved observations and offline consistency checks; not signed provider model attestation."
+  }
+}

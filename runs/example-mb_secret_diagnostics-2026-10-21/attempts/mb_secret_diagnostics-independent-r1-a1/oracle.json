@@ -1,0 +1,200 @@
+{
+  "status": "evaluated",
+  "correct": false,
+  "target_regression": true,
+  "reason": "Exact targeted regression",
+  "rows": [
+    {
+      "input": [
+        "192.0.2.10",
+        false,
+        "backup"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "192.0.2.10",
+        false,
+        "connectivity-test"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "192.0.2.10",
+        false,
+        "error-report"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "192.0.2.10",
+        true,
+        "backup"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "192.0.2.10",
+        true,
+        "connectivity-test"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "192.0.2.10",
+        true,
+        "error-report"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "185.199.108.153",
+        false,
+        "backup"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "185.199.108.153",
+        false,
+        "connectivity-test"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "185.199.108.153",
+        false,
+        "error-report"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "185.199.108.153",
+        true,
+        "backup"
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "185.199.108.153",
+        true,
+        "connectivity-test"
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "185.199.108.153",
+        true,
+        "error-report"
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "198.51.100.8",
+        false,
+        "backup"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "198.51.100.8",
+        false,
+        "connectivity-test"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "198.51.100.8",
+        false,
+        "error-report"
+      ],
+      "expected": true,
+      "target_expected": true,
+      "actual": true
+    },
+    {
+      "input": [
+        "198.51.100.8",
+        true,
+        "backup"
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "198.51.100.8",
+        true,
+        "connectivity-test"
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    },
+    {
+      "input": [
+        "198.51.100.8",
+        true,
+        "error-report"
+      ],
+      "expected": false,
+      "target_expected": false,
+      "actual": false
+    }
+  ],
+  "witnesses": [
+    {
+      "input": [
+        "185.199.108.153",
+        true,
+        "connectivity-test"
+      ],
+      "expected": false,
+      "target_expected": true,
+      "actual": true
+    }
+  ]
+}

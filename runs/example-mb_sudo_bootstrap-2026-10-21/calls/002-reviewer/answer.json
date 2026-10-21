@@ -1,0 +1,4 @@
+{
+  "verdict": "BLOCK",
+  "reason": "The candidate violates the policy: installed must not grant privileges, and restricted-service may never run any listed command. Counterexample: decision(\"restricted-service\", \"shell\", true) returns true but must return false."
+}
