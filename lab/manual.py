@@ -12,6 +12,7 @@ from .prompts import REVIEWER_INSTRUCTIONS, REVIEWER_SCHEMA, diff, reviewer_prom
 from .report import build_report
 from .storage import append_json, digest, now, read_jsonl, recover_jsonl_tail, write_json
 from .transport import CodexTransport, MODELS, TransportError, recover_interrupted_calls
+from .providers import create_transport, evidence_for, models_for
 
 MAX_SOURCE_BYTES = 20_000
 
@@ -57,12 +58,12 @@ def load_series(root, case):
         raise ValueError("Invalid manual series") from exc
 
 
-def create_series(root, case, timeout, token_limit, evidence):
+def create_series(root, case, timeout, token_limit, evidence, provider="codex", models=None):
     root.mkdir(parents=True, exist_ok=False)
     (root / "attempts").mkdir()
     manifest = {"version": __version__, "created_at": now(), "status": "running",
-        "evidence": evidence, "experiment_kind": "manual", "candidate_origin": "manual",
-        "models": {"attacker": ("manual", "not_used"), "reviewer": MODELS["reviewer"]},
+        "evidence": evidence, "provider": provider, "experiment_kind": "manual", "candidate_origin": "manual",
+        "models": {"attacker": ("manual", "not_used"), "reviewer": (models or MODELS)["reviewer"]},
         "cases": [case.id], "modes": ["manual"], "repeats": 1, "attempts_per_run": 0,
         "max_cli_invocations": 0, "token_threshold": token_limit, "call_timeout_seconds": timeout,
         "source_sha256": source_hashes(), "sampling_seed_supported": False,
@@ -78,18 +79,30 @@ def create_series(root, case, timeout, token_limit, evidence):
 
 
 def run_manual_attempt(root, case, source, timeout=600, token_limit=300_000,
-                       transport_factory=CodexTransport):
+                       transport_factory=None, provider=None, reviewer_model=None):
     validate_source(case.id, source)
     if timeout < 10 or token_limit < 1:
         raise ValueError("timeout must be >=10 seconds and token-limit positive")
     root = Path(root).resolve()
     if root.exists():
         manifest, case = load_series(root, case.id)
-        if manifest["evidence"] != transport_factory.evidence:
+        saved_provider = manifest.get("provider", "codex")
+        if provider is not None and provider != saved_provider:
+            raise ValueError("Провайдер серии закреплён. Для другой модели начните новую серию.")
+        provider = saved_provider
+        if reviewer_model is not None and reviewer_model != manifest["models"]["reviewer"][0]:
+            raise ValueError("Модель серии закреплена. Для другой модели начните новую серию.")
+        evidence = transport_factory.evidence if transport_factory else evidence_for(provider)
+        if manifest["evidence"] != evidence:
             raise ValueError("Manual series transport evidence cannot change")
     else:
+        provider = provider or "codex"
+        models = models_for(provider, reviewer_model=reviewer_model)
+        evidence = transport_factory.evidence if transport_factory else evidence_for(provider)
         validate_cases([case])
-        manifest = create_series(root, case, timeout, token_limit, transport_factory.evidence)
+        manifest = create_series(root, case, timeout, token_limit, evidence, provider, models)
+    if transport_factory is None:
+        transport_factory = lambda root, **options: create_transport(root, provider=provider, **options)
     with (root / ".manual.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

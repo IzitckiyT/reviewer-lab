@@ -4,11 +4,12 @@ from pathlib import Path
 
 from .cases import Case
 from .oracle import evaluate
-from .prompts import (ATTACKER_INSTRUCTIONS, REVIEWER_INSTRUCTIONS,
+from .prompts import (ATTACKER_INSTRUCTIONS, REVIEWER_INSTRUCTIONS, ATTACKER_SCHEMA, REVIEWER_SCHEMA,
                       attacker_prompt, reviewer_prompt, diff)
 from .report import summarize
 from .storage import digest, read_jsonl
 from .transport import parse_events
+from .providers import DEEPSEEK_ENDPOINT, PROVIDER_EVIDENCE, schema_instructions
 
 
 def verify_run(root):
@@ -38,7 +39,10 @@ def verify_run(root):
               f"Source snapshot hash mismatch: {filename}")
     histories = {}
     validated_inputs = 0
-    live = manifest["evidence"] == "live_codex_subscription"
+    live = manifest["evidence"] in PROVIDER_EVIDENCE.values()
+    provider = manifest.get("provider", "codex")
+    if live:
+        check(PROVIDER_EVIDENCE.get(provider) == manifest["evidence"], "Provider and evidence type differ")
     screening = manifest.get("experiment_kind") == "candidate_screen"
     manual = manifest.get("experiment_kind") == "manual"
     if manual:
@@ -66,6 +70,9 @@ def verify_run(root):
         request = data(prefix + "request.json")
         saved_prompt = read(prefix + "prompt.txt")
         saved_instructions = read(prefix + "instructions.txt")
+        schema = data(prefix + "schema.json")
+        check(schema == (ATTACKER_SCHEMA if role == "attacker" else REVIEWER_SCHEMA),
+              f"Response schema contains unexpected instructions: {call_id}")
         check(saved_prompt == prompt, f"Unexpected context/history in {call_id}")
         check(saved_instructions == instructions, f"Instructions differ in {call_id}")
         check(record["prompt_sha256"] == digest(saved_prompt), f"Prompt hash differs: {call_id}")
@@ -73,14 +80,58 @@ def verify_run(root):
         model, effort = manifest["models"][role]
         check((record["requested_model"], record["reasoning_effort"]) == (model, effort),
               f"Wrong model configuration in {call_id}")
-        argv = request["argv"]
-        check(argv[argv.index("--model") + 1] == model and
-              f'model_reasoning_effort="{effort}"' in argv and
-              'forced_login_method="chatgpt"' in argv and '--ephemeral' in argv,
-              f"Wrong CLI arguments in {call_id}")
+        if provider == "codex":
+            argv = request.get("argv", [])
+            check("--model" in argv and argv[argv.index("--model") + 1] == model and
+                  f'model_reasoning_effort="{effort}"' in argv and
+                  'forced_login_method="chatgpt"' in argv and '--ephemeral' in argv,
+                  f"Wrong CLI arguments in {call_id}")
+        else:
+            check(request.get("provider") == record.get("provider") == provider and
+                  request.get("requested_model") == model, f"Provider request differs: {call_id}")
+            if provider == "claude":
+                argv = request.get("argv", [])
+                check("--model" in argv and argv[argv.index("--model") + 1] == model and
+                      "--effort" in argv and argv[argv.index("--effort") + 1] == effort and
+                      "--tools" in argv and argv[argv.index("--tools") + 1] == "" and
+                      "--no-session-persistence" in argv and "--strict-mcp-config" in argv and
+                      "--safe-mode" in argv and "--restricted" in argv and
+                      "--max-turns" in argv and argv[argv.index("--max-turns") + 1] == "1" and
+                      "--system-prompt" in argv and argv[argv.index("--system-prompt") + 1] ==
+                      schema_instructions(instructions, data(prefix + "schema.json")),
+                      f"Claude isolation/configuration differs: {call_id}")
+            elif provider == "deepseek":
+                body = request.get("body", {})
+                schema = data(prefix + "schema.json")
+                system = schema_instructions(instructions, schema)
+                check(request.get("endpoint") == DEEPSEEK_ENDPOINT and body.get("model") == model and
+                      body.get("reasoning_effort") == effort and
+                      body.get("messages") == [{"role": "system", "content": system},
+                                                {"role": "user", "content": prompt}] and
+                      body.get("response_format") == {"type": "json_object"} and not body.get("tools"),
+                      f"DeepSeek request context/configuration differs: {call_id}")
         answer, usage = parse_events(read(prefix + "events.jsonl"), role)
         check(answer == data(prefix + "answer.json"), f"Answer differs from CLI events: {call_id}")
         check(usage == record["usage"], f"Usage differs from CLI events: {call_id}")
+        if provider != "codex":
+            response = data(prefix + "provider-response.json")
+            check(response.get("provider") == provider and response.get("usage") == usage,
+                  f"Provider response accounting differs: {call_id}")
+            if provider == "claude":
+                try:
+                    received = json.loads(response.get("result"))
+                except (ValueError, TypeError):
+                    received = None
+                check(received == response.get("structured_output") == answer and response.get("is_error") is False and
+                      response.get("subtype") in (None, "success"),
+                      f"Claude response differs: {call_id}")
+            elif provider == "deepseek":
+                try:
+                    received = json.loads(response.get("content"))
+                except (ValueError, TypeError):
+                    received = None
+                check(received == answer and response.get("finish_reason") == "stop" and
+                      response.get("tool_calls_used") is False, f"DeepSeek response differs: {call_id}")
         return answer
 
     for row in rows:
@@ -119,9 +170,12 @@ def verify_run(root):
             elif screening:
                 origin = row.get("candidate_origin", {})
                 check(not row.get("attacker_call"), f"Unexpected attacker call in screening: {row['id']}")
-                check(origin.get("kind") == "supplied_file" and
+                check(origin.get("kind") == manifest.get("candidate_source_kind", "supplied_file") and
                       origin.get("path") == manifest["candidate_files"][row["attempt"] - 1],
                       f"Screening provenance differs: {row['id']}")
+                if manifest.get("candidate_source_kind") == "case_seed":
+                    check(source == case.seed and origin.get("path") == f"case-seed:{case.id}",
+                          f"Case seed differs: {row['id']}")
                 previous = supplied_hashes.setdefault(row["attempt"], row["source_sha256"])
                 check(previous == row["source_sha256"], f"Screened source changed between repeats: {row['id']}")
             elif live:

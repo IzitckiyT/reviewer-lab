@@ -168,7 +168,7 @@ class CodexTransport:
                        if re.fullmatch(r"\d+-(attacker|reviewer)", p.name)]
             self.next_call_number = max(numbers, default=0) + 1
 
-    def doctor(self):
+    def doctor(self, check_models=True):
         result = subprocess.run([self.codex, "login", "status"], text=True,
             capture_output=True, env=sanitized_env(), timeout=20)
         status = result.stdout + result.stderr
@@ -178,6 +178,10 @@ class CodexTransport:
             capture_output=True, env=sanitized_env(), timeout=20)
         if version.returncode:
             raise TransportError("Cannot read Codex CLI version")
+        if not check_models:
+            return {"authentication": "ChatGPT", "cli_version": version.stdout.strip(),
+                    "cli_path": self.codex, "catalog_models_present": None,
+                    "provider_model_attestation": "Sign-in only; selected models are checked at launch"}
         catalog_result = subprocess.run([self.codex, "debug", "models", "--bundled"],
             capture_output=True, text=True, env=sanitized_env(), timeout=20)
         try:

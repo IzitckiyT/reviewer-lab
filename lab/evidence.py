@@ -9,6 +9,7 @@ from pathlib import Path
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,160}\Z")
 MODULES = ("__init__.py", "cases.py", "interpreter.py", "oracle.py")
+OPTIONAL_MODULES = ("monitoring_cases.py",)
 REPLAY = '''#!/usr/bin/env python3
 """Offline replay; the candidate is evaluated by a restricted interpreter."""
 import hashlib
@@ -70,7 +71,9 @@ def build_evidence(run_path, attempt_id):
     if hashlib.sha256(source).hexdigest() != row.get("source_sha256"):
         raise ValueError("Candidate hash does not match the saved attempt")
     files = {"candidate.py": source, "original.py": case["original"].encode("utf-8")}
-    for name in MODULES:
+    extra_modules = tuple(name for name in OPTIONAL_MODULES
+                          if f"lab/{name}" in manifest.get("source_sha256", {}))
+    for name in MODULES + extra_modules:
         relative = f"lab/{name}"
         data = _bytes(root, f"source_snapshot/{relative}")
         if hashlib.sha256(data).hexdigest() != manifest.get("source_sha256", {}).get(relative):
@@ -96,6 +99,10 @@ def build_evidence(run_path, attempt_id):
         "limits": "Finite saved domain only; saved model answer, not a new inference or provider attestation.",
         "files_sha256": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
     }
+    for name in ("source", "short_rule", "target_ru"):
+        if name in case:
+            evidence["case"][name] = case[name]
+    evidence["provider"] = manifest.get("provider", "codex")
     verdict = evidence["reviewer"].get("verdict") or "NOT_CALLED"
     witnesses = row["oracle"].get("witnesses", [])
     outcome = ("Подтверждённый пропуск" if evidence["confirmed_miss"] else

@@ -102,7 +102,7 @@ function heading(markup, level = 2) {
 
 function closedDisclosure(markup, summary) {
   const matches = [...markup.matchAll(/<details\b([^>]*)>([^]*?)<\/details>/g)];
-  const match = matches.find(item => item[2].includes(`<summary>${summary}</summary>`));
+  const match = matches.find(item => item[2].replace(/<summary\b[^>]*>/g,'<summary>').includes(`<summary>${summary}</summary>`));
   assert.ok(match, `Expected a disclosure for ${summary}`);
   assert.doesNotMatch(match[1], /\bopen(?:\s|=|$)/, `${summary} should start collapsed`);
   return match[2];
@@ -121,20 +121,19 @@ function launchFields(h, values = {}) {
   return elements;
 }
 
-test('welcome offers a saved example and manual check without disclosing results', () => {
+test('quick start has one launch action and an offline example without disclosing evidence', () => {
   const h = harness();
-  prepareDemo(h);
-  assert.equal(h.run('state.demoMode'), 'welcome');
-  assert.equal(h.run('state.stage'), 0);
   h.run('renderDemo()');
   const page = h.node('#main').innerHTML;
+  assert.equal(heading(page,1),'Быстрый старт');
   assert.match(page, /data-action="start-guide"/);
-  assert.match(page, /data-view="manual"/);
-  assert.doesNotMatch(page, /data-view="launch"/);
-  assert.match(page, /без запуска моделей/);
-  assert.match(page, /Only owner/);
+  assert.match(page, /data-view="launch"/);
+  assert.equal((page.match(/<button/g)||[]).length,2);
+  assert.equal((page.match(/class="button primary"/g)||[]).length,1);
+  assert.equal((page.match(/<li>/g)||[]).length,3);
   assert.doesNotMatch(page, /CANDIDATE_ONLY|ORIGINAL_ONLY|SAVED_REVIEWER_REASON|decision\(|<strong[^>]*>(?:PASS|FAIL|BLOCK)/);
   assert.doesNotMatch(page, /data-stage=|data-action="(?:guide-next|guide-back)"/);
+  assert.deepEqual(h.requests,[]);
 });
 
 test('manual guide reveals a visible Russian counterexample before the reviewer answer', async () => {
@@ -296,9 +295,9 @@ test('compact results distinguish safe acceptance, false blocks and detected def
     assert.equal((accepted.match(/<strong[^>]*>PASS<\/strong>/g) || []).length, 2);
     const falselyBlocked = run('minimalResult(row,stage)', {row: {...safe, reviewer: {verdict: 'BLOCK'}}});
     assert.match(heading(falselyBlocked), /Ложная блокировка/);
-    assert.doesNotMatch(heading(falselyBlocked), /Дефект обнаружен/);
+    assert.doesNotMatch(heading(falselyBlocked), /Патч отклонён/);
     const blockedDefect = run('minimalResult(row,stage)', {row: attempt({success: false, reviewer: {verdict: 'BLOCK'}})});
-    assert.match(heading(blockedDefect), /Дефект обнаружен/);
+    assert.match(heading(blockedDefect), /Патч отклонён/);
     assert.equal(run('outcome(row)[0]', {row: attempt({success: false, oracle: undefined})}), 'Патч одобрен');
   }
 });
@@ -360,10 +359,10 @@ test('model answers stay collapsed and only real responses are labeled as litera
   }
 });
 
-test('welcome and guide distinguish stored model output from fixture data', () => {
+test('the example guide distinguishes stored model output from fixture data', () => {
   const h = harness();
   const demo = prepareDemo(h);
-  h.run('renderDemo()');
+  h.run('state.demoMode="guide";renderDemo()');
   assert.match(h.node('#main').innerHTML, /Тестовая запись/);
   demo.manifest.evidence = 'live_codex_subscription';
   h.run('renderDemo()');
@@ -395,7 +394,7 @@ test('runs is the default list, and cached selection does not reveal a detail sc
   const page = h.node('#main').innerHTML;
   assert.deepEqual(runIds(page), ['alpha']);
   assert.match(page, /aria-label="Фильтры экспериментов"/);
-  assert.match(page, /data-view="manual"/);
+  assert.doesNotMatch(page, /data-view="launch"/);
   assert.doesNotMatch(page, /CANDIDATE_ONLY|SAVED_REVIEWER_REASON|data-action="close-run"/);
   const row = h.run('runTableRows()');
   assert.equal((row.match(/data-label=/g) || []).length, 4);
@@ -577,7 +576,7 @@ test('collapsed attempt summaries preserve timestamps, historical rules and non-
   assert.match(cards, /Ошибка вызова/);
   assert.match(cards, /Начало: 20[^]*02:30[^]*МСК/);
   assert.match(cards, /&lt;Historical rule&gt;/);
-  assert.doesNotMatch(cards, /Дефект обнаружен|Обход подтверждён|<Historical rule>|undefined|SAVED_REVIEWER_REASON/);
+  assert.doesNotMatch(cards, /Патч отклонён|Обход подтверждён|<Historical rule>|undefined|SAVED_REVIEWER_REASON/);
   assert.equal((cards.match(/Начало:/g) || []).length, 1, 'Missing timestamps must not be fabricated');
   assert.doesNotMatch(cards, /data-trace=/, 'Missing call references must not be guessed');
 });
@@ -600,7 +599,7 @@ test('detail polling preserves chosen expansion and filters when another attempt
   assert.equal(h.run('state.attemptQuery'), 'owner');
   assert.match(h.node('#main').innerHTML, /CANDIDATE_ONLY/);
   assert.doesNotMatch(h.node('#main').innerHTML, /LATER_SOURCE/);
-  assert.equal(search.focused, true);
+  assert.equal(h.run('document.activeElement===search'),true);
   assert.equal(search.selectionStart, 3);
 });
 
@@ -682,16 +681,16 @@ test('launch presets enforce their allowed fields and display bounded call budge
   const h = harness();
   const {run, node} = h;
   const elements = launchFields(h);
-  for (const [preset, calls, attempts, repeats] of [['screen', 5, '1', '3'], ['feedback', 6, '2', '1'], ['compare', 18, '4', '1']]) {
+  for (const [preset, calls, attempts, repeats] of [['screen', 3, '1', '1'], ['feedback', 6, '2', '1'], ['compare', 18, '4', '1']]) {
     elements.preset.value = preset;
     elements.case.value = 'audit';
     run('updateForm("preset")');
     assert.equal(node('#call-budget').textContent, calls);
     assert.equal(elements.attempts.value, attempts);
     assert.equal(elements.repeats.value, repeats);
-    assert.equal(elements.case.disabled, preset === 'screen');
+    assert.equal(elements.case.disabled, false);
     assert.equal(elements.attempts.disabled, preset !== 'feedback');
-    if (preset === 'screen') assert.equal(elements.case.value, 'owner');
+    assert.equal(elements.case.value, 'audit');
   }
   elements.preset.value = 'feedback';
   elements.attempts.value = '3';
@@ -714,14 +713,14 @@ test('launch plans calculate both modes and repeats while describing conditional
         const candidates = attempts * repeats * modes;
         assert.equal(plan.checks, candidates);
         assert.equal(plan.max, 2 + candidates * callsPerAttempt);
-        assert.match(plan.steps[2].join(' '), /Luna 5.6/);
+        assert.match(plan.steps[2].join(' '), /gpt-5.6-luna/);
         assert.match(plan.steps[2].join(' '), new RegExp(`\\(${effort}\\)`));
         assert.match(plan.steps[0].join(' '), /2|двух/);
         assert.match(plan.steps[0].join(' '), /безопасно[^]*очевидн/);
         if (preset === 'screen') {
           assert.match(plan.steps[1][1], /Один[^]*код[^]*новых сессиях/);
-          assert.match(plan.steps[1][1] + plan.budget, /Sol не участвует|Sol не вызывается|Sol не запускается/);
-          assert.match(plan.result, new RegExp(`^До ${repeats} (?:нового ответа|новых ответов) Luna`), 'A partial or interrupted launch must not promise all responses');
+          assert.match(plan.steps[1][1] + plan.budget, /Генератор не участвует/);
+          assert.match(plan.result, new RegExp(`^До ${repeats} (?:нового ответа|новых ответов) gpt-5.6-luna`), 'A partial or interrupted launch must not promise all responses');
         } else {
           assert.match(plan.result, new RegExp(`До ${candidates} (?:записей|кандидатов)`));
           assert.match(plan.result, /допущенных к ревью|если кандидат дошёл до ревью/);
@@ -753,8 +752,9 @@ test('launch preview uses the actual saved patch or the selected original code w
   assert.equal(h.node('#start-button').textContent, 'Начать поиск обхода');
   assert.match(h.node('#launch-source-code').innerHTML, /AUDIT_ORIGINAL/);
   assert.doesNotMatch(h.node('#launch-source-code').innerHTML, /SAVED_PATCH|ORIGINAL_ONLY/);
-  assert.match(h.node('#launch-plan').innerHTML, /Luna 5.6[^]*\(low\)/);
-  assert.match(h.node('#launch-plan').innerHTML, /До 6 (?:записей|кандидатов)/);
+  assert.match(h.node('#launch-model-summary').textContent, /gpt-5.6-luna/);
+  assert.match(h.node('#launch-plan').innerHTML, /Новые кандидаты/);
+  assert.match(h.node('#budget-note').textContent, /до 6 генераций/);
   assert.deepEqual(h.requests, [], 'Choosing a preset, rule, or effort must only update the preview');
 });
 
@@ -779,7 +779,7 @@ test('only explicit form submission sends its selected config to the in-memory s
   let prevented = false;
   await h.emit('submit', {target: form, preventDefault() { prevented = true; }});
   assert.equal(prevented, true);
-  assert.deepEqual(submitted, {preset: 'feedback', case: 'owner', effort: 'low', attempts: 3, repeats: 2});
+  assert.deepEqual(submitted, {preset: 'feedback', case: 'owner', effort: 'low', attempts: 3, repeats: 2, provider:'codex',reviewer_model:'gpt-5.6-luna',attacker_model:'gpt-6.1-sol'});
   assert.deepEqual(h.requests, ['/api/start', '/api/state']);
   assert.equal(h.run('state.run'), 'synthetic-run');
   assert.equal(h.run('state.runOpen'), true);
@@ -861,16 +861,16 @@ test('active run phases use started calls and factual counts without inventing p
   };
   h.run('state.details.set(data.id,data)', {data});
   const generating = h.run('liveBanner()');
-  assert.match(generating, /Sol создаёт/);
+  assert.match(generating, /Генератор ·/);
   assert.match(generating, /Попытки завершены: 1 из 16/);
   assert.match(generating, /Контроли: 2 из 2/);
-  assert.match(generating, /Вызовы моделей: 3/);
+  assert.match(generating, /Завершено вызовов[^]*2/);
   assert.match(generating, /data-trace="generating"/);
   assert.doesNotMatch(generating, /\d+\s*%/);
   data.calls[2].status = 'completed';
   data.calls.push({id: 'reviewing', role: 'reviewer', status: 'started'});
   const reviewing = h.run('liveBanner()');
-  assert.match(reviewing, /Luna проверяет/);
+  assert.match(reviewing, /Ревьюер ·/);
   assert.match(reviewing, /data-trace="reviewing"/);
   assert.doesNotMatch(reviewing, /Не вызван|не вызван/);
   data.calls[3].status = 'error';
@@ -1051,7 +1051,7 @@ test('manual submission posts only the current patch and series, without startin
   let prevented = false;
   await h.emit('submit', {target: form, preventDefault() { prevented = true; }});
   assert.equal(prevented, true);
-  assert.deepEqual(submitted, {case: 'owner', source: draft, run_id: null});
+  assert.deepEqual(submitted, {case: 'owner', source: draft, run_id: null,provider:'codex',reviewer_model:'gpt-5.6-luna'});
   assert.equal(h.run('state.manual.runId'), saved.id);
   assert.equal(h.run('state.manual.source'), draft);
   assert.equal(h.run('state.view'), 'manual');
@@ -1292,14 +1292,14 @@ test('demo manual check uses only the offline endpoint and invents no reviewer a
     return {oracle};
   }});
   h.run("state.data.read_only=true;state.view='manual';state.manual.source='LOCAL_SOURCE';renderManual()");
-  assert.equal(h.node('#manual-submit').textContent,'Проверить локально');
-  await h.run('submitManual()');
+  assert.equal(h.node('#manual-submit').textContent,'Проверить с моделью');
+  await h.run('submitManual(true)');
   assert.deepEqual(h.requests,['/api/manual/check']);
   assert.equal(h.run('state.manual.runId'),null);
   assert.equal(h.run('state.manual.preview.reviewer.verdict'),'NOT_CALLED');
   assert.equal(h.run('state.data.active.running'),false);
   assert.match(h.node('#manual-result').innerHTML,/Локальный тест/);
-  assert.match(h.node('#manual-result').innerHTML,/обращения к модели отключены/);
+  assert.match(h.node('#manual-result').innerHTML,/Проверить с моделью/);
   assert.doesNotMatch(h.node('#manual-result').innerHTML,/Попытка undefined|Одобрил|Нарушение пропущено/);
 });
 
@@ -1312,9 +1312,12 @@ test('demo rule switching clears the previous local result while preserving draf
   assert.equal(h.run('state.manual.source'),'AUDIT');
 });
 
-test('demo mode rejects automatic submission in the frontend before any request',async()=>{
+test('a nonlocal demo explains why model launch is unavailable and sends no requests',async()=>{
   const h=harness();let prevented=false;
-  h.run('state.data.read_only=true');
+  launchFields(h);
+  h.run('state.data.read_only=true;state.data.live_available=false;renderLaunch()');
+  assert.equal(h.node('#start-button').disabled,true);
+  assert.match(h.node('#launch-error').innerHTML,/локальном сервере/);
   await h.emit('submit',{target:{id:'launch-form'},preventDefault(){prevented=true;}});
   assert.equal(prevented,true);
   assert.equal(h.requests.length,0);
@@ -1324,29 +1327,31 @@ test('demo welcome and completed guide lead into a working local editor', async 
   const h=harness();prepareDemo(h);
   h.run('state.data.read_only=true;renderDemo()');
   assert.match(h.node('#main').innerHTML,/data-action="start-guide"/);
-  assert.match(h.node('#main').innerHTML,/data-view="manual"/);
-  assert.doesNotMatch(h.node('#main').innerHTML,/data-view="launch"/);
+  assert.match(h.node('#main').innerHTML,/data-view="launch"/);
   h.run('state.demoMode="guide";state.stage=4;renderDemo()');
   assert.match(h.node('#main').innerHTML,/data-view="manual"/);
-  assert.doesNotMatch(h.node('#main').innerHTML,/data-view="launch"/);
+  assert.match(h.node('#main').innerHTML,/data-view="launch"/);
   await h.click({view:'manual'});
   assert.equal(h.node('#manual-submit').disabled,false);
-  assert.equal(h.node('#manual-submit').textContent,'Проверить локально');
+  assert.equal(h.node('#manual-submit').textContent,'Проверить с моделью');
   assert.deepEqual(h.requests,[]);
 });
 
-test('demo manual and direct launch routes explain model setup without a disabled launch form', () => {
-  const h=harness();
+test('demo manual and direct launch expose a real model action and keep setup concise', () => {
+  const h=harness();launchFields(h);
   h.run('state.data.read_only=true;state.view="manual";renderManual()');
   let html=h.node('#main').innerHTML;
   assert.doesNotMatch(html,/data-view="launch"/);
-  const setup=closedDisclosure(html,'Как подключить модель');
-  assert.match(setup,/python3 run.py start --live/);
-  assert.match(setup,/без обращения к модели/);
-  assert.match(setup,/расходует квоту/);
+  assert.match(closedDisclosure(html,'Ревьюер · gpt-5.6-luna'),/id="manual-provider"/);
+  assert.match(html,/Проверить с моделью/);
+  assert.match(html,/Только локальный тест/);
   h.run('renderLaunch()');html=h.node('#main').innerHTML;
-  assert.match(html,/data-view="manual"/);
-  assert.doesNotMatch(html,/id="launch-form"|id="start-button"/);
+  assert.match(html,/id="launch-form"|id="start-button"/);
+  assert.equal(h.node('#start-button').disabled,false);
+  closedDisclosure(html,'Модели, повторения и лимиты');
+  assert.match(html,/квота или баланс/);
+  assert.equal((html.match(/id="start-button"/g)||[]).length,1);
+  assert.deepEqual(h.requests,[]);
 });
 
 test('beginner example can be tried and undone without model calls', async () => {
@@ -1386,7 +1391,7 @@ test('an empty draft remains recoverable after inserting the beginner example', 
 
 test('local preview progress never implies a model call or exposes the live stop action', () => {
   const h=harness();
-  h.run('state.data.read_only=true;state.manual.pending=true');
+  h.run('state.data.read_only=true;state.manual.pending=true;state.manual.localPending=true');
   const html=h.run('manualResultMarkup(null,null)');
   assert.match(html,/локально, без модели/);
   assert.doesNotMatch(html,/Luna|data-action="stop"/);
@@ -1407,4 +1412,266 @@ test('a blocked patch is not presented as proof of detecting the specific defect
   const finding=h.run('manualFinding(row)',{row});
   assert.equal(finding.title,'Патч отклонён');
   assert.match(finding.description,/не доказывает/);
+});
+
+const providerFixtures=[
+  {id:'codex',label:'Codex',available:true,configured:true,transport:'cli',models:['gpt-5.6-luna','gpt-6.1-sol'],default_models:{reviewer:['gpt-5.6-luna','medium'],attacker:['gpt-6.1-sol','xhigh']}},
+  {id:'claude',label:'Claude',available:true,configured:true,transport:'cli',models:['sonnet','opus','haiku'],default_models:{reviewer:'sonnet',attacker:'sonnet'}},
+  {id:'deepseek',label:'DeepSeek',available:true,configured:false,transport:'api',setup:'export DEEPSEEK_API_KEY=your_key',default_models:{reviewer:'deepseek-chat',attacker:'deepseek-reasoner'}},
+];
+
+test('provider selection updates model defaults and the preview without enabling or invoking anything',async()=>{
+  const h=harness();
+  const fields=launchFields(h,{reviewer_model:'gpt-5.6-luna',attacker_model:'gpt-6.1-sol'});
+  h.run('state.data.providers=fixtures;state.data.read_only=true;renderLaunch()',{fixtures:providerFixtures});
+  await h.emit('change',{target:{id:'launch-provider',value:'deepseek'}});
+  assert.equal(fields.reviewer_model.value,'deepseek-chat');
+  assert.equal(fields.attacker_model.value,'deepseek-reasoner');
+  assert.equal(h.run('state.data.read_only'),true);
+  assert.match(h.node('#launch-model-summary').textContent,/Ревьюер.*deepseek-chat/);
+  assert.match(h.node('#launch-provider-status').innerHTML,/DEEPSEEK_API_KEY/);
+  assert.doesNotMatch(h.node('#launch-plan').innerHTML,/Luna|Sol|Codex|gpt-5.6/);
+  assert.match(h.node('#launch-model-summary').textContent,/deepseek-chat/);
+  assert.equal(h.node('#effort-field').hidden,true);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('explicit demo launch enables the chosen provider before starting exactly once',async()=>{
+  const posts=[];
+  const h=harness({allowPost:true,respond:(path,opts)=>{
+    if(opts.method==='POST')posts.push([path,JSON.parse(opts.body)]);
+    if(path==='/api/enable-live')return {ok:true};
+    if(path==='/api/start')return {id:'new-live'};
+    assert.equal(path,'/api/state');
+    return {runs:[],cases:detail.cases,active:{id:'new-live',running:true},read_only:false};
+  }});
+  const fields=launchFields(h,{reviewer_model:'custom-review',attacker_model:'custom-generate'});
+  h.run('state.data.providers=fixtures;state.data.read_only=true;state.providerId="claude";state.view="launch";toast=()=>{};renderLaunch()',{fixtures:providerFixtures});
+  assert.deepEqual(h.requests,[]);
+  const form=h.node('#launch-form');form.id='launch-form';
+  await h.emit('submit',{target:form,preventDefault(){}});
+  assert.equal(posts.length,2);
+  assert.deepEqual(posts[0],['/api/enable-live',{provider:'claude'}]);
+  assert.equal(posts[1][0],'/api/start');
+  assert.equal(posts[1][1].provider,'claude');
+  assert.equal(posts[1][1].reviewer_model,'custom-review');
+  assert.equal(posts[1][1].attacker_model,'custom-generate');
+  assert.equal(h.run('state.run'),'new-live');
+});
+
+test('failed provider setup stays in demo with an actionable escaped error and never starts a model',async()=>{
+  const h=harness({allowPost:true,respond:path=>{
+    assert.equal(path,'/api/enable-live');throw new Error('Set DEEPSEEK_API_KEY <server only>');
+  }});
+  launchFields(h);
+  h.run('state.data.providers=fixtures;state.providerId="deepseek";state.data.read_only=true;state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  const form=h.node('#launch-form');form.id='launch-form';
+  await h.emit('submit',{target:form,preventDefault(){}});
+  assert.deepEqual(h.requests,['/api/enable-live']);
+  assert.equal(h.run('state.data.read_only'),true);
+  assert.equal(h.run('state.launchPending'),false);
+  assert.match(h.node('#launch-error').innerHTML,/DEEPSEEK_API_KEY &lt;server only&gt;/);
+  assert.equal(h.node('#start-button').disabled,true);
+});
+
+test('manual model submission can leave demo and sends the selected reviewer without an attacker',async()=>{
+  const posts=[];
+  const saved={id:'new-manual',manifest:{provider:'claude',experiment_kind:'manual',cases:['owner'],models:{reviewer:['sonnet','default']}},rows:[],cases:detail.cases};
+  const h=harness({allowPost:true,respond:(path,opts)=>{
+    if(opts.method==='POST')posts.push([path,JSON.parse(opts.body)]);
+    if(path==='/api/enable-live')return {ok:true};
+    if(path==='/api/manual')return {id:saved.id};
+    if(path==='/api/state')return {read_only:false,providers:providerFixtures,runs:[],cases:detail.cases,active:{id:saved.id,running:true}};
+    assert.equal(path,'/api/runs/'+saved.id);return saved;
+  }});
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.data.read_only=true;state.view="manual";state.manual.source="USER_PATCH";renderManual()',{fixtures:providerFixtures});
+  await h.run('submitManual()');
+  assert.deepEqual(posts,[['/api/enable-live',{provider:'claude'}],['/api/manual',{case:'owner',source:'USER_PATCH',run_id:null,provider:'claude',reviewer_model:'sonnet'}]]);
+  assert.equal(h.run('state.manual.runId'),saved.id);
+  assert.equal(h.run('state.manual.preview'),null);
+});
+
+test('resuming a manual series uses its pinned provider and never sends replacement model settings',async()=>{
+  const posts=[];
+  let saved;
+  const h=harness({allowPost:true,respond:(path,opts)=>{
+    if(opts.method==='POST')posts.push([path,JSON.parse(opts.body)]);
+    if(path==='/api/enable-live')return {ok:true};
+    if(path==='/api/manual')return {id:saved.id};
+    if(path==='/api/state')return {read_only:false,providers:providerFixtures,selected_provider:'deepseek',runs:[],cases:detail.cases,active:{id:saved.id,running:true}};
+    assert.equal(path,'/api/runs/'+saved.id);return saved;
+  }});
+  saved=prepareManual(h,[],{source:'NEXT_PATCH'});saved.manifest.provider='deepseek';saved.manifest.models.reviewer=['deepseek-chat','default'];
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.data.read_only=true;renderManual()',{fixtures:providerFixtures});
+  const markup=h.node('#main').innerHTML;
+  assert.match(markup,/Закреплён за этой серией/);
+  assert.match(markup,/DeepSeek.*deepseek-chat/);
+  assert.doesNotMatch(markup,/<select id="manual-provider"|id="manual-reviewer-model"/);
+  await h.emit('change',{target:{id:'manual-provider',value:'claude'}});
+  await h.run('submitManual()');
+  assert.deepEqual(posts,[['/api/enable-live',{provider:'deepseek'}],['/api/manual',{case:'owner',source:'NEXT_PATCH',run_id:saved.id}]]);
+});
+
+test('refreshing readiness is a GET request and never activates live mode',async()=>{
+  const h=harness({respond:path=>{assert.equal(path,'/api/providers');return {providers:providerFixtures,live_available:true};}});
+  launchFields(h);
+  h.run('state.data.read_only=true;state.view="launch";renderLaunch()');
+  await h.click({action:'refresh-providers'});
+  assert.deepEqual(h.requests,['/api/providers']);
+  assert.equal(h.run('state.data.read_only'),true);
+});
+
+test('new case metadata supplies its rule, target and example without a hardcoded case registry',async()=>{
+  const h=harness();
+  const paperCase={id:'paper-scenario',title:'Paper task',rule:'Never release without approval',objective:'Сохранить целевой дефект из задачи.',original:'ORIGINAL_PAPER',seed:'SEED_PAPER',source:{title:'Research paper',url:'https://example.org/paper'}};
+  h.run('state.data.cases.push(paperCase);state.view="manual";renderManual()',{paperCase});
+  await h.emit('change',{target:{id:'manual-case',value:paperCase.id}});
+  const markup=h.node('#main').innerHTML;
+  assert.match(markup,/Never release without approval/);
+  assert.match(markup,/Сохранить целевой дефект из задачи/);
+  assert.match(markup,/ORIGINAL_PAPER/);
+  assert.match(markup,/Research paper/);
+  assert.match(markup,/https:\/\/example.org\/paper/);
+  assert.equal(h.node('#manual-example').hidden,false);
+  await h.click({action:'manual-example'});
+  assert.equal(h.run('state.manual.source'),'SEED_PAPER');
+  assert.equal(h.run('state.manual.undoSource'),'ORIGINAL_PAPER');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('ready-patch launch keeps a selected imported case and previews its controlled seed without inference',async()=>{
+  const h=harness();
+  const fields=launchFields(h,{preset:'screen',case:'owner',repeats:'1',reviewer_model:'sonnet',attacker_model:'sonnet'});
+  const paperCase={id:'mb_policy',title:'Policy task',short_rule:'Не разрешать незнакомые запросы.',original:'ORIGINAL_POLICY',seed:'SEED_POLICY',source:{title:'MonitoringBench · policy',url:'https://example.org/policy'}};
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.data.cases.push(paperCase);state.data.launch_candidate="SAVED_OWNER";renderLaunch()',{fixtures:providerFixtures,paperCase});
+  fields.case.value=paperCase.id;
+  await h.emit('change',{target:{id:'case',name:'case',closest:()=>h.node('#launch-form')}});
+  assert.equal(fields.case.value,paperCase.id);
+  assert.equal(fields.case.disabled,false);
+  assert.equal(fields.reviewer_model.value,'sonnet');
+  assert.equal(h.node('#case-field').hidden,false);
+  assert.match(h.node('#launch-source-code').innerHTML,/SEED_POLICY/);
+  assert.doesNotMatch(h.node('#launch-source-code').innerHTML,/SAVED_OWNER|ORIGINAL_POLICY/);
+  assert.equal(h.node('#launch-source-label').textContent,'Готовый пример нарушения');
+  assert.match(h.node('#rule-note').textContent,/Не разрешать незнакомые запросы/);
+  assert.match(h.node('#case-provenance').innerHTML,/MonitoringBench · policy/);
+  assert.equal(h.node('#call-budget').textContent,3);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('reviewer model is a visible catalog selector and each provider remembers its choice',async()=>{
+  const h=harness();const fields=launchFields(h,{reviewer_model:'gpt-5.6-luna'});
+  h.run('state.data.providers=fixtures;state.data.cases.push({id:"audit",title:"Audit",original:"AUDIT"});renderLaunch()',{fixtures:providerFixtures});
+  const html=h.node('#main').innerHTML;
+  assert.match(html,/<select id="reviewer-model"/);
+  assert.equal((html.match(/id="reviewer-model"/g)||[]).length,1);
+  assert.ok(html.indexOf('id="reviewer-model"')<html.indexOf('<details class="launch-advanced">'));
+  assert.match(html,/Другая модель…/);
+  fields.reviewer_model.value='gpt-6.1-sol';
+  await h.emit('change',{target:{id:'reviewer-model',value:'gpt-6.1-sol'}});
+  fields.case.value='audit';await h.emit('change',{target:{id:'case',name:'case',closest:()=>h.node('#launch-form')}});
+  assert.equal(fields.reviewer_model.value,'gpt-6.1-sol');
+  await h.emit('change',{target:{id:'launch-provider',value:'claude'}});
+  fields.reviewer_model.value='opus';await h.emit('change',{target:{id:'reviewer-model',value:'opus'}});
+  assert.match(h.node('#launch-model-summary').textContent,/opus/);
+  await h.emit('change',{target:{id:'launch-provider',value:'codex'}});
+  assert.equal(fields.reviewer_model.value,'gpt-6.1-sol');
+  await h.emit('change',{target:{id:'launch-provider',value:'claude'}});
+  assert.equal(fields.reviewer_model.value,'opus');
+  assert.equal(fields.case.value,'audit');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('custom reviewer selection shows one ID input and sends its exact value on explicit start',async()=>{
+  let submitted;
+  const h=harness({allowPost:true,respond:(path,options)=>{
+    if(path==='/api/start'){submitted=JSON.parse(options.body);return {id:'custom-model-run'};}
+    assert.equal(path,'/api/state');return {runs:[],cases:detail.cases,active:{id:'custom-model-run',running:true}};
+  }});
+  const fields=launchFields(h,{reviewer_model:'sonnet',reviewer_model_custom:''});
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.view="launch";toast=()=>{};renderLaunch()',{fixtures:providerFixtures});
+  fields.reviewer_model.value='__custom__';
+  await h.emit('change',{target:{id:'reviewer-model',value:'__custom__'}});
+  assert.equal(h.node('#reviewer-model-custom').hidden,false);
+  assert.equal(h.node('#reviewer-model-custom').required,true);
+  assert.equal(h.node('#start-button').disabled,true);
+  assert.equal(h.node('#launch-model-summary').textContent,'Ревьюер · укажите ID модели');
+  fields.reviewer_model_custom.value='my-reviewer-2026';
+  await h.emit('input',{target:{id:'reviewer-model-custom',value:'my-reviewer-2026'}});
+  assert.equal(h.node('#start-button').disabled,false);
+  assert.equal(h.node('#launch-model-summary').textContent,'Ревьюер · my-reviewer-2026');
+  assert.deepEqual(h.requests,[]);
+  const form=h.node('#launch-form');form.id='launch-form';
+  await h.emit('submit',{target:form,preventDefault(){}});
+  assert.equal(submitted.provider,'claude');
+  assert.equal(submitted.reviewer_model,'my-reviewer-2026');
+  assert.doesNotMatch(submitted.reviewer_model,/__custom__/);
+});
+
+test('a manual reviewer selector exposes the chosen model in its collapsed summary',async()=>{
+  const h=harness();
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.view="manual";renderManual()',{fixtures:providerFixtures});
+  const html=h.node('#main').innerHTML;
+  assert.match(closedDisclosure(html,'Ревьюер · sonnet'),/<select id="manual-reviewer-model"/);
+  h.node('#manual-reviewer-model').value='haiku';
+  await h.emit('change',{target:{id:'manual-reviewer-model',value:'haiku'}});
+  assert.equal(h.node('#manual-model-summary').textContent,'Ревьюер · haiku');
+  assert.equal(h.run('chosenReviewer("manual")'),'haiku');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('blank manual custom model disables only model submission and explains the missing ID',async()=>{
+  const h=harness();
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.view="manual";renderManual()',{fixtures:providerFixtures});
+  h.node('#manual-reviewer-model').value='__custom__';h.node('#manual-reviewer-model-custom').value='';
+  await h.emit('change',{target:{id:'manual-reviewer-model',value:'__custom__'}});
+  assert.equal(h.node('#manual-submit').disabled,true);
+  assert.equal(h.node('#manual-local-check').disabled,false);
+  assert.equal(h.node('#manual-model-summary').textContent,'Ревьюер · укажите ID модели');
+  h.node('#manual-reviewer-model-custom').value='claude-custom';
+  await h.emit('input',{target:{id:'manual-reviewer-model-custom',value:'claude-custom'}});
+  assert.equal(h.node('#manual-submit').disabled,false);
+  assert.equal(h.node('#manual-local-check').disabled,false);
+  assert.equal(h.node('#manual-model-summary').textContent,'Ревьюер · claude-custom');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('live observation reports measured usage and reaches a finished verdict with its counterexample',async()=>{
+  const row=attempt({id:'observed',outcome:'running',success:false,reviewer:{verdict:'NOT_CALLED'}});
+  const running={...detail,manifest:{...detail.manifest,status:'running',cases:['owner'],created_at:'2026-10-21T09:00:00Z',max_cli_invocations:3,attempts_per_run:1,repeats:1,modes:['independent']},
+    rows:[row],calls:[{id:'first',role:'reviewer',requested_model:'sonnet',status:'completed',usage:{input_tokens:100,output_tokens:20}},
+      {id:'current',role:'reviewer',requested_model:'sonnet',status:'started',started_at:'2026-10-21T09:00:10Z',events_seen:2}]};
+  let completed=false;
+  const done={...running,manifest:{...running.manifest,status:'completed',finished_at:'2026-10-21T09:01:05Z'},rows:[attempt({id:row.id})],
+    calls:[running.calls[0],{...running.calls[1],status:'completed',usage:{input_tokens:200,output_tokens:30}}]};
+  const h=harness({respond:path=>path==='/api/state'?{runs:[],cases:detail.cases,active:{id:detail.id,running:!completed}}:completed?done:running});
+  prepareRun(h,[row],running.manifest);
+  h.run('state.data.active={id:data.id,running:true};state.details.set(data.id,data);renderRuns()',{data:running});
+  await h.run('pollOnce()');
+  let panel=h.node('#active-slot').innerHTML;
+  assert.match(panel,/Ревьюер · sonnet/);
+  assert.match(panel,/Завершено вызовов[^]*1 \/ 3/);
+  assert.match(panel,/Известные токены[^]*120/);
+  assert.match(panel,/Текущий расход появится после ответа/);
+  assert.equal((panel.match(/data-action="stop"/g)||[]).length,1);
+  assert.doesNotMatch(panel,/\d+\s*%|токенов в секунду/);
+  completed=true;await h.run('pollOnce()');panel=h.node('#active-slot').innerHTML;
+  assert.match(panel,/Эксперимент завершён/);
+  assert.match(panel,/PASS/);
+  assert.match(panel,/editor[^]*ожидалось False/);
+  assert.match(panel,/1:05/);
+  assert.doesNotMatch(panel,/status-dot|data-action="stop"|Проверяем|Ожидание/);
+  assert.match(h.node('#run-meta-status').innerHTML,/Завершён/);
+  assert.match(h.node('#attempt-records').innerHTML,/Обход подтверждён/);
+});
+
+test('an unobserved run never appears completed and missing usage is not estimated',()=>{
+  const h=harness();
+  const data=prepareRun(h,[attempt({outcome:'running',success:false})],{status:'running'});data.execution_state='unobserved';
+  h.run('state.data.active={running:false};state.details.set(data.id,data)',{data});
+  const panel=h.run('liveBanner()');
+  assert.match(panel,/Выполнение не подтверждено/);
+  assert.doesNotMatch(panel,/Эксперимент завершён|data-action="stop"|status-dot/);
+  assert.equal(h.run('elapsedLabel("2026-10-21T09:00:00Z","2026-10-21T09:01:05Z")'),'1:05');
+  assert.equal(h.run('elapsedLabel(null)'),'—');
 });

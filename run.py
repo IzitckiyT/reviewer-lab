@@ -17,6 +17,7 @@ from lab.engine import run_campaign
 from lab.oracle import evaluate, validate_cases
 from lab.report import build_report
 from lab.transport import CodexTransport, TransportError
+from lab.providers import catalog, create_transport, models_for
 from lab.verify import verify_run
 
 ROOT = Path(__file__).resolve().parent
@@ -32,8 +33,11 @@ def main(argv=None):
     start.add_argument("--live", action="store_true", help="Явно разрешить новые обращения к моделям и расход квоты")
     start.add_argument("--port", type=int, default=None, help="Порт; по умолчанию 8765 или свободный, если 8765 занят")
     start.add_argument("--no-open", action="store_true", help="Напечатать адрес без открытия браузера")
+    start.add_argument("--provider", choices=("codex", "claude", "deepseek"), default="codex")
     commands.add_parser("check", help="Offline validation of all custom case fixtures")
-    commands.add_parser("doctor", help="Check CLI and ChatGPT login; no inference")
+    doctor = commands.add_parser("doctor", help="Проверить подключение провайдера без обращения к модели")
+    doctor.add_argument("--provider", choices=("codex", "claude", "deepseek"), default="codex")
+    commands.add_parser("providers", help="Показать поддерживаемые провайдеры и настройку")
     commands.add_parser("cases", help="List custom cases")
     ui = commands.add_parser("ui", help="Local dashboard and presentation replay; no model calls on opening")
     ui.add_argument("--port", type=int, default=None, help="Listen port (REVIEWER_LAB_PORT, default 8765)")
@@ -54,14 +58,21 @@ def main(argv=None):
     run.add_argument("--out", type=Path)
     run.add_argument("--reviewer-effort", choices=["low", "medium"], default="medium")
     run.add_argument("--strategy", choices=["original", "guided"], default="original")
+    run.add_argument("--provider", choices=("codex", "claude", "deepseek"), default="codex")
+    run.add_argument("--reviewer-model", help="Идентификатор модели ревьюера у выбранного провайдера")
+    run.add_argument("--attacker-model", help="Идентификатор модели генератора у выбранного провайдера")
     run.add_argument("--candidate-files", nargs="+", type=Path,
                      help="Screen existing candidates without calling the attacker; one case and independent mode required")
+    run.add_argument("--seed-candidate", action="store_true", help="Проверить готовый дефект выбранной задачи без генератора")
     manual = commands.add_parser("manual", help="Append a human-authored attempt; model calls only for a target regression")
     manual.add_argument("--case", choices=CASES, default="owner")
     manual.add_argument("--source", type=str, required=True, help="Complete candidate Python file, or - for stdin")
     manual.add_argument("--out", type=Path, required=True, help="New or existing manual series directory")
     manual.add_argument("--timeout", type=int, default=600)
     manual.add_argument("--token-limit", type=int, default=300_000)
+    manual.add_argument("--provider", choices=("codex", "claude", "deepseek"), default=None,
+                        help="Провайдер новой серии; существующая серия сохраняет своё подключение")
+    manual.add_argument("--reviewer-model", help="Модель ревьюера новой серии")
     report = commands.add_parser("report", help="Rebuild an existing run report without model calls")
     report.add_argument("run_dir", type=Path)
     verify = commands.add_parser("verify", help="Offline audit of saved traces, context isolation and oracle")
@@ -77,21 +88,9 @@ def main(argv=None):
             port = args.port if args.port is not None else int(configured_port or "8765")
             if not 0 <= port <= 65535:
                 raise ValueError("Порт должен быть от 0 до 65535")
-            if args.live:
-                print("Проверяем настройку Codex без обращения к модели…", flush=True)
-                try:
-                    readiness = CodexTransport(ROOT).doctor()
-                except (TransportError, OSError, subprocess.TimeoutExpired) as exc:
-                    raise RuntimeError(
-                        f"Live-режим пока не готов: {exc}\n"
-                        "Проверьте установку и вход в Codex: python3 run.py doctor.\n"
-                        "Для демо без аккаунта и моделей: python3 run.py"
-                    ) from exc
-                print(f"Codex: {readiness['cli_path']}\n"
-                      "Авторизация и каталог проверены. Доступ к модели проверится при первом запросе.", flush=True)
             serve(ROOT, port, not args.no_open, read_only=not args.live,
                   fallback_port=args.port is None and not configured_port,
-                  start_path="#manual" if args.live else "#demo")
+                  start_path="#launch" if args.live else "#demo", provider=args.provider)
         elif args.command == "ui":
             from lab.ui import serve
             port = args.port if args.port is not None else int(os.environ.get("REVIEWER_LAB_PORT", "8765"))
@@ -113,7 +112,9 @@ def main(argv=None):
             for case in CASES.values():
                 print(f"{case.id}: {case.title} ({len(case.inputs())} inputs)")
         elif args.command == "doctor":
-            print(json.dumps(CodexTransport(ROOT).doctor(), indent=2, ensure_ascii=False))
+            print(json.dumps(create_transport(ROOT, provider=args.provider).doctor(), indent=2, ensure_ascii=False))
+        elif args.command == "providers":
+            print(json.dumps(catalog(), indent=2, ensure_ascii=False))
         elif args.command == "report":
             print(json.dumps(build_report(args.run_dir), indent=2, ensure_ascii=False))
         elif args.command == "verify":
@@ -132,7 +133,8 @@ def main(argv=None):
                 with Path(args.source).open(encoding="utf-8") as code:
                     source = code.read(MAX_SOURCE_BYTES + 1)
             result = run_manual_attempt(args.out, CASES[args.case], source,
-                                        timeout=args.timeout, token_limit=args.token_limit)
+                                        timeout=args.timeout, token_limit=args.token_limit,
+                                        provider=args.provider, reviewer_model=args.reviewer_model)
             print(f"Manual series {result['status']}: {args.out.resolve() / 'report.html'}")
             return 0 if result["status"] == "completed" else 2
         else:
@@ -147,12 +149,14 @@ def main(argv=None):
                 repeats=args.repeats, modes=tuple(args.modes), schedule_seed=args.schedule_seed,
                 timeout=args.timeout, token_limit=args.token_limit,
                 reviewer_effort=args.reviewer_effort, strategy=args.strategy,
-                candidate_files=args.candidate_files)
+                candidate_files=args.candidate_files, provider=args.provider,
+                reviewer_model=args.reviewer_model, attacker_model=args.attacker_model,
+                seed_candidate=args.seed_candidate)
             print(f"Run {result['status']}: {out.resolve() / 'report.html'}")
             return 0 if result["status"] == "completed" else 2
     except subprocess.TimeoutExpired:
-        print("Проверка Codex не ответила за 20 секунд. Попробуйте python3 run.py doctor ещё раз. "
-              "Демо доступно без Codex: python3 run.py", file=sys.stderr)
+        print("Проверка подключения не ответила за отведённое время. "
+              "Повторите doctor --provider <провайдер>. Интерфейс: python3 run.py", file=sys.stderr)
         return 2
     except (ValueError, OSError, RuntimeError) as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)

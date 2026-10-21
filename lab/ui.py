@@ -19,6 +19,8 @@ from .oracle import evaluate
 from .manual import check_source, load_series, validate_source
 from .report import summarize
 from .evidence import build_evidence
+from .providers import catalog, create_transport, models_for, setup_status
+from .transport import TransportError, redact
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,160}\Z")
 FEATURED = "replication-collision-medium-2026-10-19"
@@ -97,7 +99,7 @@ def inside(root, *parts):
 
 
 class Dashboard:
-    def __init__(self, root, read_only=False):
+    def __init__(self, root, read_only=False, provider="codex"):
         self.root = Path(root).resolve()
         self.runs = self.root / "runs"
         self.token = secrets.token_urlsafe(32)
@@ -107,6 +109,54 @@ class Dashboard:
         self.stop_requested = False
         self.exit_code = None
         self.read_only = read_only
+        self.selected_provider = provider
+        self.live_available = True
+
+    def providers(self):
+        result = []
+        for entry in catalog():
+            status = setup_status(entry["id"])
+            models = models_for(entry["id"])
+            result.append({**entry, **status, "id": entry["id"],
+                           "default_models": {role: value[0] for role, value in models.items()},
+                           "transport": entry.get("kind", entry["id"])})
+        return {"providers": result, "selected_provider": self.selected_provider,
+                "live_available": self.live_available}
+
+    def enable_live(self, config):
+        if not self.live_available:
+            raise PermissionError("Эксперименты доступны при локальном запуске проекта. "
+                                  "Запустите Start Experiment.command на своём компьютере.")
+        if not isinstance(config, dict) or set(config) != {"provider"}:
+            raise ValueError("Выберите провайдера")
+        provider = config["provider"]
+        models_for(provider)  # Validate the selection before inspecting authentication.
+        with self.lock:
+            if self.process and self.process.poll() is None:
+                raise RuntimeError("Дождитесь завершения текущего эксперимента")
+        try:
+            transport = create_transport(self.root, provider=provider)
+            readiness = transport.doctor(check_models=False) if provider == "codex" else transport.doctor()
+        except (TransportError, OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(redact(str(exc))) from exc
+        with self.lock:
+            if self.process and self.process.poll() is None:
+                raise RuntimeError("Дождитесь завершения текущего эксперимента")
+            self.selected_provider = provider
+            self.read_only = False
+        return {"read_only": False, "provider": provider, "readiness": readiness}
+
+    def model_options(self, config, *, manual=False):
+        provider = config.get("provider", self.selected_provider)
+        reviewer = config.get("reviewer_model") or None
+        attacker = config.get("attacker_model") or None
+        models_for(provider, reviewer, attacker, config.get("effort", "medium"))
+        args = ["--provider", provider]
+        if reviewer is not None:
+            args.extend(["--reviewer-model", reviewer])
+        if attacker is not None and not manual:
+            args.extend(["--attacker-model", attacker])
+        return args
 
     def require_live(self):
         if self.read_only:
@@ -218,7 +268,9 @@ class Dashboard:
 
     def launch(self, config):
         self.require_live()
-        if not isinstance(config, dict) or set(config) != {"preset", "case", "effort", "attempts", "repeats"}:
+        required = {"preset", "case", "effort", "attempts", "repeats"}
+        if (not isinstance(config, dict) or not required <= set(config) or
+                set(config) - required - {"provider", "reviewer_model", "attacker_model"}):
             raise ValueError("Invalid run settings")
         preset, case, effort = config["preset"], config["case"], config["effort"]
         attempts, repeats = config["attempts"], config["repeats"]
@@ -226,21 +278,26 @@ class Dashboard:
             raise ValueError("Unknown experiment profile")
         if type(attempts) is not int or not 1 <= attempts <= 4 or type(repeats) is not int or not 1 <= repeats <= 3:
             raise ValueError("Invalid attempt or repeat count")
-        if preset == "screen" and (case != "owner" or attempts != 1):
-            raise ValueError("Saved candidate requires owner and one attempt")
+        if preset == "screen" and attempts != 1:
+            raise ValueError("Готовый пример требует одну попытку")
         if preset == "compare" and attempts != 4:
             raise ValueError("Comparison requires four attempts per mode")
         run_id = "ui-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         args = [sys.executable, "-u", str(self.root / "run.py"), "run", "--cases", case,
                 "--reviewer-effort", effort, "--attempts", str(attempts), "--repeats", str(repeats),
-                "--out", str(self.runs / run_id), "--modes"]
+                "--out", str(self.runs / run_id)]
+        args.extend(self.model_options(config))
+        args.append("--modes")
         args.extend(["independent", "feedback"] if preset == "compare" else
                     ["independent"] if preset == "screen" else ["feedback"])
         if preset == "screen":
-            candidate = self.root / "examples" / "successful-owner-bypass.py"
-            if not candidate.is_file():
-                raise FileNotFoundError("Saved candidate is missing")
-            args.extend(["--candidate-files", str(candidate)])
+            if case == "owner":
+                candidate = self.root / "examples" / "successful-owner-bypass.py"
+                if not candidate.is_file():
+                    raise FileNotFoundError("Saved candidate is missing")
+                args.extend(["--candidate-files", str(candidate)])
+            else:
+                args.append("--seed-candidate")
         with self.lock:
             if self.process and self.process.poll() is None:
                 raise RuntimeError("An experiment is already running")
@@ -265,7 +322,9 @@ class Dashboard:
 
     def launch_manual(self, config):
         self.require_live()
-        if not isinstance(config, dict) or set(config) != {"case", "source", "run_id"}:
+        required = {"case", "source", "run_id"}
+        if (not isinstance(config, dict) or not required <= set(config) or
+                set(config) - required - {"provider", "reviewer_model"}):
             raise ValueError("Invalid manual attempt")
         case, source, run_id = config["case"], config["source"], config["run_id"]
         validate_source(case, source)
@@ -276,13 +335,20 @@ class Dashboard:
                 raise RuntimeError("An experiment is already running")
             if run_id is not None:
                 try:
-                    load_series(self.run_path(run_id), case)
+                    manifest, _ = load_series(self.run_path(run_id), case)
                 except FileNotFoundError as exc:
                     raise ValueError("Manual series does not exist") from exc
+                provider = manifest.get("provider", "codex")
+                model = manifest["models"]["reviewer"][0]
+                if config.get("provider", provider) != provider or config.get("reviewer_model", model) != model:
+                    raise ValueError("Подключение серии закреплено. Для другой модели начните новую серию.")
+                options = self.model_options({"provider": provider, "reviewer_model": model}, manual=True)
             else:
                 run_id = "manual-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                options = self.model_options(config, manual=True)
             args = [sys.executable, "-u", str(self.root / "run.py"), "manual",
                     "--case", case, "--source", "-", "--out", str(inside(self.runs, run_id))]
+            args.extend(options)
             logs = self.runs / ".ui-logs"
             logs.mkdir(parents=True, exist_ok=True)
             # An inherited file descriptor avoids shell interpolation, argument-size limits
@@ -301,11 +367,12 @@ class Dashboard:
 
 
 def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=False,
-                public_origins=None):
-    app = dashboard or Dashboard(root, read_only=read_only)
+                public_origins=None, provider="codex"):
+    app = dashboard or Dashboard(root, read_only=read_only, provider=provider)
     if read_only:
         app.read_only = True
     validate_binding(bind, app.read_only)
+    app.live_available = ipaddress.IPv4Address(bind).is_loopback
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("port must be 0..65535")
     # Validate before acquiring a socket; port 0 defaults resolve after binding.
@@ -353,10 +420,14 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                 if path == "/api/state":
                     return self.send(200, {"token": app.token, "runs": app.list_runs(),
                         "read_only": app.read_only,
+                        **app.providers(),
                         "active": app.active(), "featured": FEATURED,
                         "example": read_json(app.root / "examples" / "successful-owner-evidence.json"),
                         "launch_candidate": read_text(app.root / "examples" / "successful-owner-bypass.py", 20_000),
-                        "cases": [c.public() for c in CASES.values()]})
+                        "cases": [c.ui() if hasattr(c, "ui") else
+                                  {**c.public(), "seed": c.seed, "target": c.target} for c in CASES.values()]})
+                if path == "/api/providers":
+                    return self.send(200, app.providers())
                 parts = path.strip("/").split("/")
                 if len(parts) == 3 and parts[:2] == ["api", "runs"]:
                     return self.send(200, app.detail(parts[2]))
@@ -385,6 +456,8 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                 if not 0 < length <= limit:
                     raise ValueError("Invalid request size")
                 config = json.loads(self.rfile.read(length))
+                if self.path == "/api/enable-live":
+                    return self.send(200, app.enable_live(config))
                 if self.path == "/api/start":
                     return self.send(201, app.launch(config))
                 if self.path == "/api/manual":
@@ -422,10 +495,10 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
 
 
 def serve(root, port=8765, open_browser=False, *, bind="127.0.0.1", read_only=False,
-          public_origins=None, fallback_port=False, start_path=""):
+          public_origins=None, fallback_port=False, start_path="", provider="codex"):
     import webbrowser
     try:
-        server = make_server(root, port, bind=bind, read_only=read_only, public_origins=public_origins)
+        server = make_server(root, port, bind=bind, read_only=read_only, public_origins=public_origins, provider=provider)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
@@ -436,11 +509,11 @@ def serve(root, port=8765, open_browser=False, *, bind="127.0.0.1", read_only=Fa
                 f"--port {alternative}. Для автоматического выбора свободного порта: --port 0."
             ) from exc
         # Let the OS bind and reserve a free port atomically; no check-then-bind race.
-        server = make_server(root, 0, bind=bind, read_only=read_only, public_origins=public_origins)
+        server = make_server(root, 0, bind=bind, read_only=read_only, public_origins=public_origins, provider=provider)
         print(f"Порт {port} занят. Выбран свободный порт {server.server_port}.", flush=True)
     url = sorted(server.allowed_origins)[0] + start_path
     mode = DEMO_MESSAGE if server.dashboard.read_only else (
-        "Live-режим: проверка патча и автоматический поиск могут расходовать квоту Codex. "
+        "Эксперименты доступны: выберите провайдера и нажмите Запустить. Вызовы используют квоту или API-баланс. "
         "Просмотр сохранённых результатов не вызывает модели.")
     print(f"\nReviewer Lab: {url}\n{mode}\nОстановка: Ctrl+C в этом окне.", flush=True)
     try:

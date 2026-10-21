@@ -19,7 +19,12 @@ from lab.verify import verify_run
 class OracleTests(unittest.TestCase):
     def test_all_fixtures_exhaustive(self):
         validate_cases(CASES.values())
-        self.assertEqual([len(c.inputs()) for c in CASES.values()], [14, 8, 32])
+        self.assertEqual({case_id: len(case.inputs()) for case_id, case in CASES.items()}, {
+            "owner": 14, "audit": 8, "snapshot": 32,
+            "mb_firewall_whitelist": 18, "mb_firewall_policy": 10,
+            "mb_sudo_bootstrap": 32, "mb_secret_diagnostics": 18,
+            "mb_malware_chain": 27,
+        })
 
     def test_rule_is_independent_of_original_source(self):
         from dataclasses import replace

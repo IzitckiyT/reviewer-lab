@@ -29,7 +29,7 @@ class LauncherTests(unittest.TestCase):
         with patch('lab.ui.serve') as start_server, patch('run.CodexTransport') as codex:
             self.assertEqual(cli.main([]), 0)
         start_server.assert_called_once_with(cli.ROOT, 8765, True, read_only=True,
-                                             fallback_port=True, start_path='#demo')
+                                             fallback_port=True, start_path='#demo', provider='codex')
         codex.assert_not_called()
 
     def test_start_demo_ignores_live_environment_and_respects_explicit_port(self):
@@ -37,7 +37,7 @@ class LauncherTests(unittest.TestCase):
                 patch('lab.ui.serve') as start_server, patch('run.CodexTransport') as codex:
             self.assertEqual(cli.main(['start', '--port', '0', '--no-open']), 0)
         start_server.assert_called_once_with(cli.ROOT, 0, False, read_only=True,
-                                             fallback_port=False, start_path='#demo')
+                                             fallback_port=False, start_path='#demo', provider='codex')
         codex.assert_not_called()
 
     def test_configured_port_does_not_silently_fall_back(self):
@@ -46,33 +46,27 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(start_server.call_args.args[1], 9000)
         self.assertFalse(start_server.call_args.kwargs['fallback_port'])
 
-    def test_live_preflight_failure_never_opens_server(self):
-        with patch('run.CodexTransport') as codex, patch('lab.ui.serve') as start_server:
-            codex.return_value.doctor.side_effect = TransportError('ChatGPT sign-in required')
-            self.assertEqual(cli.main(['start', '--live']), 2)
-        start_server.assert_not_called()
-        codex.return_value.call.assert_not_called()
-        self.assertIn('Live-режим пока не готов', self.output.getvalue())
-        self.assertIn('Для демо без аккаунта', self.output.getvalue())
-
-    def test_explicit_live_checks_readiness_before_serving(self):
-        events = []
-        with patch('run.CodexTransport') as codex, patch('lab.ui.serve') as start_server:
-            codex.return_value.doctor.side_effect = lambda: events.append('doctor') or {'cli_path': '/test/codex'}
-            start_server.side_effect = lambda *args, **kwargs: events.append('server')
-            self.assertEqual(cli.main(['start', '--live']), 0)
-        self.assertEqual(events, ['doctor', 'server'])
-        codex.return_value.call.assert_not_called()
+    def test_live_chooser_opens_without_requiring_codex(self):
+        with patch('run.create_transport') as transport, patch('lab.ui.serve') as start_server:
+            self.assertEqual(cli.main(['start', '--live', '--provider', 'deepseek']), 0)
+        transport.assert_not_called()
         self.assertFalse(start_server.call_args.kwargs['read_only'])
-        self.assertEqual(start_server.call_args.kwargs['start_path'], '#manual')
-        self.assertIn('Доступ к модели проверится при первом запросе', self.output.getvalue())
+        self.assertEqual(start_server.call_args.kwargs['start_path'], '#launch')
+        self.assertEqual(start_server.call_args.kwargs['provider'], 'deepseek')
+
+    def test_provider_doctor_uses_selected_transport_without_inference(self):
+        with patch('run.create_transport') as transport:
+            transport.return_value.doctor.return_value = {'provider': 'claude'}
+            self.assertEqual(cli.main(['doctor', '--provider', 'claude']), 0)
+        transport.assert_called_once_with(cli.ROOT, provider='claude')
+        transport.return_value.call.assert_not_called()
 
     def test_doctor_timeout_has_actionable_message_without_traceback(self):
-        with patch('run.CodexTransport') as codex:
+        with patch('run.create_transport') as codex:
             codex.return_value.doctor.side_effect = subprocess.TimeoutExpired(['codex', 'login', 'status'], 20)
             self.assertEqual(cli.main(['doctor']), 2)
-        self.assertIn('не ответила за 20 секунд', self.output.getvalue())
-        self.assertIn('Демо доступно без Codex', self.output.getvalue())
+        self.assertIn('не ответила за отведённое время', self.output.getvalue())
+        self.assertNotIn('Traceback', self.output.getvalue())
 
     @staticmethod
     def server(port=49123):

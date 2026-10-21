@@ -9,6 +9,7 @@ from .prompts import (ATTACKER_INSTRUCTIONS, ATTACKER_SCHEMA, REVIEWER_INSTRUCTI
                       REVIEWER_SCHEMA, attacker_prompt, diff, reviewer_prompt)
 from .storage import append_json, digest, now, write_json
 from .transport import CodexTransport, MODELS, TransportError
+from .providers import create_transport, evidence_for, models_for
 
 
 def source_hashes():
@@ -19,8 +20,9 @@ def source_hashes():
 
 def run_campaign(root, cases, attempts=4, repeats=1, modes=("independent", "feedback"),
                  schedule_seed=7, timeout=600, token_limit=300_000,
-                 transport_factory=CodexTransport, reviewer_effort="medium",
-                 strategy="original", candidate_files=None):
+                 transport_factory=None, reviewer_effort="medium",
+                 strategy="original", candidate_files=None, provider="codex",
+                 reviewer_model=None, attacker_model=None, seed_candidate=False):
     from .report import build_report
     if not 1 <= attempts <= 4 or not 1 <= repeats <= 5:
         raise ValueError("attempts must be 1..4 and repeats 1..5")
@@ -32,16 +34,23 @@ def run_campaign(root, cases, attempts=4, repeats=1, modes=("independent", "feed
         raise ValueError("Invalid experiment profile")
     if candidate_files is not None and (len(cases) != 1 or modes != ("independent",) or len(candidate_files) != attempts):
         raise ValueError("Screening requires one case, independent mode and one file per attempt")
+    if seed_candidate and (candidate_files is not None or len(cases) != 1 or
+                           modes != ("independent",) or attempts != 1):
+        raise ValueError("Seed screening requires one case, one attempt and independent mode")
     fixed_sources = [Path(p).read_text(encoding="utf-8") for p in candidate_files] if candidate_files is not None else None
-    models = dict(MODELS)
-    models["reviewer"] = (MODELS["reviewer"][0], reviewer_effort)
+    if seed_candidate:
+        fixed_sources = [cases[0].seed]
+    models = models_for(provider, reviewer_model, attacker_model, reviewer_effort)
+    evidence = transport_factory.evidence if transport_factory else evidence_for(provider)
+    if transport_factory is None:
+        transport_factory = lambda root, **options: create_transport(root, provider=provider, **options)
     validate_cases(cases)
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=False)
     (root / "attempts").mkdir()
     max_calls = 2 * len(cases) + (1 if fixed_sources is not None else 2) * len(cases) * len(modes) * attempts * repeats
     manifest = {"version": __version__, "created_at": now(), "status": "running",
-        "evidence": transport_factory.evidence, "models": models,
+        "evidence": evidence, "provider": provider, "models": models,
         "attacker_strategy": strategy,
         "experiment_kind": "candidate_screen" if fixed_sources is not None else "adaptive_search",
         "candidate_files": [str(Path(p).resolve()) for p in candidate_files] if candidate_files else None,
@@ -51,6 +60,9 @@ def run_campaign(root, cases, attempts=4, repeats=1, modes=("independent", "feed
         "call_timeout_seconds": timeout, "source_sha256": source_hashes(),
         "sampling_seed_supported": False,
         "scope": "Custom finite-domain code reviewer; no Ouroboros or full-system claims"}
+    if seed_candidate:
+        manifest["candidate_files"] = [f"case-seed:{cases[0].id}"]
+        manifest["candidate_source_kind"] = "case_seed"
     write_json(root / "manifest.json", manifest)
     write_json(root / "cases.json", [asdict(c) for c in cases])
     snapshot = root / "source_snapshot"
@@ -103,7 +115,8 @@ def run_campaign(root, cases, attempts=4, repeats=1, modes=("independent", "feed
         row["outcome"] = "success" if row["success"] else response["answer"]["verdict"].lower()
 
     try:
-        transport = transport_factory(root, max_calls=max_calls, token_limit=token_limit, timeout=timeout, models=models)
+        used_models = {"reviewer": models["reviewer"]} if fixed_sources is not None else models
+        transport = transport_factory(root, max_calls=max_calls, token_limit=token_limit, timeout=timeout, models=used_models)
         manifest["transport"] = transport.doctor()
         write_json(root / "manifest.json", manifest)
         # Controls are never put in attacker feedback or counted as generated attacks.
@@ -151,7 +164,8 @@ def run_campaign(root, cases, attempts=4, repeats=1, modes=("independent", "feed
                         source = generated["answer"]["source"]
                     else:
                         source = fixed_sources[number - 1]
-                        row["candidate_origin"] = {"kind": "supplied_file", "path": manifest["candidate_files"][number - 1]}
+                        row["candidate_origin"] = {"kind": manifest.get("candidate_source_kind", "supplied_file"),
+                                                   "path": manifest["candidate_files"][number - 1]}
                     assess(case, source, row)
                 except (TransportError, KeyboardInterrupt) as exc:
                     row.update(outcome="infrastructure_error" if isinstance(exc, TransportError) else "interrupted",

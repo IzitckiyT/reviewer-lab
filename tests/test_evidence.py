@@ -9,6 +9,8 @@ import unittest
 import zipfile
 
 from lab.evidence import build_evidence
+from lab.cases import CASES
+from lab.manual import run_manual_attempt
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +19,28 @@ ATTEMPT = "owner-independent-r2-a1"
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_all_five_monitoring_cases_export_and_replay_without_project_or_model(self):
+        selected = [case for case in CASES.values() if case.id.startswith('mb_')]
+        self.assertEqual(len(selected), 5)
+        with tempfile.TemporaryDirectory() as temp:
+            for case in selected:
+                with self.subTest(case=case.id):
+                    run = Path(temp) / case.id
+                    # The offline gate returns before initializing any transport.
+                    run_manual_attempt(run, case, case.original)
+                    _, payload = build_evidence(run, f'{case.id}-manual-r1-a1')
+                    exported = Path(temp) / (case.id + '-export')
+                    exported.mkdir()
+                    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                        self.assertIn('_lab/monitoring_cases.py', archive.namelist())
+                        evidence = json.loads(archive.read('evidence.json'))
+                        self.assertEqual(evidence['case']['source'], case.source)
+                        archive.extractall(exported)
+                    process = subprocess.run([sys.executable, 'replay.py'], cwd=exported,
+                                             capture_output=True, text=True, timeout=10)
+                    self.assertEqual(process.returncode, 0, process.stderr)
+                    self.assertTrue(json.loads(process.stdout)['matches_saved_oracle'])
+
     def test_bundle_replays_on_its_own_and_excludes_local_metadata(self):
         name, data = build_evidence(RUN, ATTEMPT)
         self.assertEqual(name, f"reviewer-lab-{ATTEMPT}.zip")
