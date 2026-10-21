@@ -10,23 +10,42 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/workspace.css">
   <link rel="stylesheet" href="/run-story.css">
+  <link rel="stylesheet" href="/task-library.css">
+  <link rel="stylesheet" href="/navigation.css">
   <script src="/case-copy.js" defer></script>
   <script src="/test-explanation.js" defer></script>
   <script src="/provider-setup.js" defer></script>
   <script src="/run-story.js" defer></script>
+  <script src="/task-library.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
   <aside class="app-rail" aria-label="Навигация лаборатории">
-    <a class="rail-brand" href="/" aria-label="Reviewer Lab — быстрый старт"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 19V5h6.5a4.5 4.5 0 0 1 0 9H6m6-1 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <a class="rail-brand" href="/#launch" aria-label="Reviewer Lab — новый запуск"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 19V5h6.5a4.5 4.5 0 0 1 0 9H6m6-1 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="rail-brand-copy">Reviewer Lab<small>Проверка AI-ревьюеров</small></span></a>
     <nav class="rail-nav" aria-label="Разделы">
-      <button class="nav-button active" type="button" data-view="runs" title="Эксперименты" aria-label="Эксперименты"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6m-5 0v6l-5.6 9.3A2.5 2.5 0 0 0 6.5 22h11a2.5 2.5 0 0 0 2.1-3.7L14 9V3M7 15h10"/></svg><span id="run-count" class="visually-hidden">—</span></button>
-      <button class="nav-button" type="button" data-view="demo" title="Быстрый старт" aria-label="Быстрый старт"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 8 6 4-6 4V8Z"/></svg></button>
-      <button class="nav-button rail-launch" type="button" data-view="launch" title="Запустить эксперимент" aria-label="Запустить эксперимент"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="nav-button active" type="button" data-view="launch" title="Новый запуск" aria-label="Новый запуск"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 10 7-10 7V5Z"/></svg><span class="nav-label"><span class="nav-label-full">Новый запуск</span><span class="nav-label-short" aria-hidden="true">Запуск</span></span></button>
+      <button class="nav-button" type="button" data-view="tasks" title="Задачи и правила проверки" aria-label="Задачи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span class="nav-label">Задачи</span><span id="task-count" class="nav-count" aria-label="Доступных задач">8</span></button>
+      <button class="nav-button" type="button" data-view="runs" title="История экспериментов" aria-label="История экспериментов"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5M12 7v5l3 2"/></svg><span class="nav-label">История</span><span id="run-count" class="nav-count" aria-label="Сохранённых экспериментов">—</span></button>
+      <button class="nav-button" type="button" data-view="manual" title="Проверить свой код" aria-label="Проверить свой код"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 7-5 5 5 5m10-10 5 5-5 5M14 4l-4 16"/></svg><span class="nav-label">Свой код</span></button>
     </nav>
+    <details class="rail-help">
+      <summary><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 0 1 4.7.6c0 1.7-2.4 1.9-2.4 3.6M12 16h.01"/></svg><span class="nav-label"><span class="nav-label-full">Быстрый старт</span><span class="nav-label-short" aria-hidden="true">Начать</span></span><svg class="rail-help-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m5 3 5 5-5 5"/></svg></summary>
+      <div class="rail-help-panel">
+        <span class="rail-help-kicker">Как устроена лаборатория</span>
+        <h2>Замечает ли AI ошибку?</h2>
+        <p>Мы даём модели код с известной ошибкой и проверяем, заметит ли она нарушение правила.</p>
+        <ol>
+          <li><strong>Выберите задачу</strong><span>В описании — что разрешено и где спрятана ошибка.</span></li>
+          <li><strong>Выберите ревьюера</strong><span>Модель прочитает код и решит, можно ли его одобрить.</span></li>
+          <li><strong>Посмотрите результат</strong><span>Увидите ответ модели и конкретную ситуацию, в которой код нарушает правило.</span></li>
+        </ol>
+        <div class="rail-help-links"><button type="button" data-view="tasks">Посмотреть задачи <span aria-hidden="true">→</span></button><button type="button" data-action="start-guide">Разобрать пример без модели <span aria-hidden="true">→</span></button></div>
+        <small>Просмотр задач и описаний ничего не запускает.</small>
+      </div>
+    </details>
     <div class="rail-bottom">
-      <div class="connection" title="Состояние подключения"><span class="status-dot" id="connection-dot" aria-hidden="true"></span><span id="connection-label" class="visually-hidden" aria-live="polite">Подключаемся…</span></div>
-      <button class="nav-button presentation-button" type="button" id="present-button" aria-label="Режим лекции" aria-pressed="false" title="Режим лекции"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H4V4Zm8 12v5m-4 0h8M2 4h20"/></svg></button>
+      <button class="nav-button presentation-button" type="button" id="present-button" aria-label="Режим лекции" aria-pressed="false" title="Режим лекции"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H4V4Zm8 12v5m-4 0h8M2 4h20"/></svg><span class="nav-label"><span class="nav-label-full">Презентация</span><span class="nav-label-short" aria-hidden="true">Показ</span></span></button>
+      <div class="connection" title="Состояние локального сервера"><span class="status-dot" id="connection-dot" aria-hidden="true"></span><span id="connection-label" aria-live="polite">Подключаемся…</span></div>
     </div>
   </aside>
   <div class="workspace">

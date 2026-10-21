@@ -67,7 +67,8 @@
     const configured = api && c.status === 'configured';
     const tone = ready ? 'ready' : configured || c.status === 'unchecked' ? 'pending' : 'missing';
     const refresh = '<button type="button" class="text-button provider-connection-refresh" data-action="refresh-providers">' + (ready || api ? 'Обновить статус' : 'Проверить вход') + ' ↻</button>';
-    return '<div class="provider-connection provider-connection-' + tone + '"><p class="provider-connection-status"><span aria-hidden="true"></span>' + escape(connectionSummary(p)) + '</p><p class="provider-connection-description">' + escape(modelNote(p)) + '</p>' + (api ? deepseekHelp(c) : cliHelp(p, c)) + refresh + '</div>';
+    const help = (api ? deepseekHelp(c) : cliHelp(p, c)).replace('</summary>', '</summary><p class="provider-connection-description">' + escape(modelNote(p)) + '</p>');
+    return '<div class="provider-connection provider-connection-' + tone + '"><p class="provider-connection-status"><span aria-hidden="true"></span>' + escape(connectionSummary(p)) + '</p>' + help + refresh + '</div>';
   }
   root.LabProviderSetup = Object.freeze({statusMarkup, pickerLabel, connectionSummary, modelNote});
 })(globalThis);

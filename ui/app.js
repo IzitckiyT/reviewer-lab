@@ -6,7 +6,7 @@ const json = v => JSON.stringify(v, null, 2);
 const pythonValue = v => v === true ? 'True' : v === false ? 'False' : JSON.stringify(v);
 const state = {data:null, view:'runs', run:null, runOpen:false, attempt:null, details:new Map(), demoRun:null,
   demoAttempt:null, stage:0, demoMode:'welcome', playing:false, timer:null, tab:'snippet', inspectorTab:'source', trace:null, runQuery:'', runFilter:'all', runCase:'all', runStatus:'all', runEffort:'all', filtersExpanded:false, attemptOpen:false, attemptQuery:'', attemptFilter:'all', attemptSort:'original', launchPending:false,
-  providerId:null,reviewerModels:{},launchCase:'owner',casePicker:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
+  providerId:null,reviewerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
 const replicationIds = ['replication-collision-low-2026-10-19','replication-collision-medium-2026-10-19'];
 let toastTimer;
 function toast(message) { $('#toast').textContent=message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),4500); }
@@ -27,27 +27,48 @@ function caseCopy(id) {return globalThis.LabCaseCopy?.has(id)?globalThis.LabCase
 function caseTitle(id) {return caseCopy(id)?.title||caseMetadata(id)?.title||id;}
 function caseRule(id) {const c=caseMetadata(id);return caseCopy(id)?.rule||c?.rule_ru||c?.short_rule||rules[id]||c?.rule||'Сохраните поведение, заданное правилом задачи.';}
 function isMonitoringCase(c) {return c.id.startsWith('mb_');}
-function casePreviewMarkup(id,context='launch',preset='screen') {
-  const copy=caseCopy(id);if(!copy)return '';
-  const example=copy.example;
-  return `<span class="case-example-label">${context==='manual'||preset!=='screen'?'Какую ошибку ищем':'Пример ошибки в готовом коде'}</span><p class="case-example-situation">${esc(LabCaseCopy.scenarioText(id,example.input))}</p><div class="case-example-decisions"><div><small>По правилу</small><strong>${esc(LabCaseCopy.decisionText(id,example.expected))}</strong></div><div><small>В примере с ошибкой</small><strong>${esc(LabCaseCopy.decisionText(id,example.actual))}</strong></div></div>`;
-}
 function caseChoiceMarkup(context,id,{locked=false}={}) {
   const c=caseMetadata(id)||state.data.cases[0],count=state.data.cases.length;
   const field=context==='manual'?'manual-case':'case';
-  return `<div class="case-choice"><div class="case-choice-heading"><span class="case-choice-label" id="${context}-case-label">Задача${isMonitoringCase(c)?' · MonitoringBench':''}</span><button class="case-choice-button" type="button" id="${context}-case-button" data-action="choose-case" data-case-context="${context}" aria-haspopup="dialog" aria-controls="case-dialog" ${locked?'disabled':''}>Выбрать задачу · ${count}<span aria-hidden="true">↗</span></button></div><strong id="${context}-case-title">${esc(caseTitle(c.id))}</strong><p id="${context==='launch'?'rule-note':'manual-rule-note'}" class="case-choice-rule">${esc(caseRule(c.id))}</p><div id="${context}-case-violation" class="case-choice-violation">${casePreviewMarkup(c.id,context)}</div>${locked?'<small class="case-choice-locked">Задача закреплена за серией. Для другой задачи создайте новую серию.</small>':''}<select id="${field}" ${context==='launch'?'name="case"':''} aria-label="Выбранная задача" hidden ${locked?'disabled':''}>${state.data.cases.map(item=>`<option value="${esc(item.id)}" ${item.id===id?'selected':''}>${esc(caseTitle(item.id))}</option>`).join('')}</select></div>`;
+  return `<div class="case-choice"><div class="case-choice-heading"><span class="case-choice-label" id="${context}-case-label">Задача${isMonitoringCase(c)?' · MonitoringBench':''}</span><button class="case-choice-button" type="button" id="${context}-case-button" data-action="choose-case" data-case-context="${context}" aria-haspopup="dialog" aria-controls="case-dialog" ${locked?'disabled':''}>Выбрать задачу · ${count}<span aria-hidden="true">↗</span></button></div><strong id="${context}-case-title">${esc(caseTitle(c.id))}</strong><p id="${context==='launch'?'rule-note':'manual-rule-note'}" class="case-choice-rule">${esc(caseCopy(c.id)?.summary||caseRule(c.id))}</p><div class="case-choice-actions"><button type="button" class="text-button" id="${context}-case-details" data-action="task-details" data-task-id="${esc(c.id)}" data-context="${context}">Подробнее о задаче <span aria-hidden="true">→</span></button></div>${locked?'<small class="case-choice-locked">Задача закреплена за серией. Для другой задачи создайте новую серию.</small>':''}<select id="${field}" ${context==='launch'?'name="case"':''} aria-label="Выбранная задача" hidden ${locked?'disabled':''}>${state.data.cases.map(item=>`<option value="${esc(item.id)}" ${item.id===id?'selected':''}>${esc(caseTitle(item.id))}</option>`).join('')}</select></div>`;
 }
 function casePickerMarkup(context) {
   const selected=context==='manual'?state.manual.caseId:$('#launch-form')?.elements?.case?.value||state.launchCase;
-  const groups=[['Базовые задачи',state.data.cases.filter(c=>!isMonitoringCase(c))],['MonitoringBench · адаптации',state.data.cases.filter(isMonitoringCase)]];
-  return groups.filter(([,cases])=>cases.length).map(([title,cases])=>`<section class="case-option-group"><h3>${title}<span>${cases.length}</span></h3><div class="case-options">${cases.map(c=>`<button type="button" class="case-option ${selected===c.id?'selected':''}" data-case-option="${esc(c.id)}" aria-pressed="${selected===c.id}"><span class="case-option-marker" aria-hidden="true">${selected===c.id?'✓':''}</span><span><strong>${esc(caseTitle(c.id))}</strong><small>${esc(caseRule(c.id))}</small></span></button>`).join('')}</div></section>`).join('');
+  return LabTaskLibrary.list(state.data.cases,{selectedId:selected,context});
+}
+function showCaseDialog(title,description,markup,detailView=false) {
+  $('#case-dialog-title').textContent=title;$('#case-dialog-description').textContent=description;
+  $('#case-options').innerHTML=markup;
+  const dialog=$('#case-dialog');dialog.classList.toggle('showing-task-detail',detailView);
+  if(!dialog.open)dialog.showModal();
+  dialog.scrollTop=0;
 }
 function openCasePicker(context) {
   if(!['launch','manual'].includes(context)||state.launchPending||context==='manual'&&(state.manual.runId||state.manual.pending||state.manualRequestPending))return;
-  state.casePicker=context;$('#case-options').innerHTML=casePickerMarkup(context);
-  $('#case-dialog-description').textContent=`${state.data.cases.length} задач. Выберите, какое правило должен проверить ревьюер.`;
-  const dialog=$('#case-dialog');if(!dialog.open)dialog.showModal();
-  $('#case-options .case-option.selected')?.focus();
+  state.casePicker=context;
+  showCaseDialog('Выберите задачу',`${state.data.cases.length} сценариев. Откройте описание, чтобы понять правило и ошибку.`,casePickerMarkup(context));
+  $('#case-options .is-selected')?.focus();
+}
+function openTaskDetails(id,context=null) {
+  if(!['launch','manual'].includes(context)){navigate('tasks',id);return;}
+  state.casePicker=context;
+  const selected=context==='manual'?state.manual.caseId:state.launchCase;
+  const locked=state.launchPending||context==='manual'&&!!(state.manual.runId||state.manual.pending||state.manualRequestPending);
+  showCaseDialog('Описание задачи','Ситуация, правило и пример нарушения.',LabTaskLibrary.detail(caseMetadata(id),{context,selected:selected===id,locked}),true);
+  $('#case-options .task-detail-back')?.focus();
+}
+function useTask(id,context=null) {
+  if(!caseMetadata(id)||!caseCopy(id)||state.launchPending)return;
+  if(['launch','manual'].includes(context)) {
+    if(context!==state.casePicker||context==='manual'&&(state.manual.runId||state.manual.pending||state.manualRequestPending))return;
+    selectCase(context,id);closeCasePicker();
+  } else {
+    state.launchCase=id;if(state.launchDraft)state.launchDraft.case=id;navigate('launch');
+  }
+}
+function renderTasks() {
+  const selectedId=state.launchCase;
+  $('#main').innerHTML=state.taskId?LabTaskLibrary.detail(caseMetadata(state.taskId),{selected:state.taskId===selectedId,locked:state.launchPending}):`<section class="tasks-page"><header class="page-head"><div><h1>Задачи</h1><p class="subtitle">Выберите, какую ошибку должен заметить ревьюер.</p></div></header>${LabTaskLibrary.list(state.data.cases,{selectedId})}</section>`;
 }
 function closeCasePicker() {const context=state.casePicker;state.casePicker=null;$('#case-dialog').close();if(context)$('#'+context+'-case-button')?.focus();}
 function selectCase(context,id) {
@@ -60,7 +81,7 @@ function selectCase(context,id) {
   }
 }
 function caseProvenance(c) {
-  if(!c?.source)return '';
+  if(!c?.source||caseCopy(c.id))return '';
   const source=c.source,label=typeof source==='string'?source:source.title||source.label||'Источник задачи';
   const href=typeof source==='object'?source.url:'';
   return `<p class="case-provenance">${href&&/^https:\/\//.test(href)?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`:esc(label)}</p>`;
@@ -97,7 +118,7 @@ function reviewerModels(provider) {
 function reviewerValue(provider=selectedProvider()) {return state.reviewerModels[provider.id]||defaultModel(provider,'reviewer');}
 function modelPickerMarkup(context,provider=selectedProvider()) {
   const prefix=context==='manual'?'manual-reviewer-model':'reviewer-model',value=reviewerValue(provider),models=reviewerModels(provider),custom=!models.includes(value);
-  return `<div class="form-field reviewer-model-picker"><label for="${prefix}">Модель ревьюера</label><select id="${prefix}" name="reviewer_model">${models.map(model=>`<option value="${esc(model)}" ${!custom&&model===value?'selected':''}>${esc(model)}</option>`).join('')}<option value="__custom__" ${custom?'selected':''}>Другая модель…</option></select><input id="${prefix}-custom" name="reviewer_model_custom" value="${esc(custom?value:'')}" placeholder="ID модели" aria-label="ID модели ревьюера" autocomplete="off" ${custom?'':'hidden'}>${provider.models_note?`<p class="model-catalog-note">${esc(provider.models_note)}</p>`:''}</div>`;
+  return `<div class="form-field reviewer-model-picker"><label for="${prefix}">Модель ревьюера</label><select id="${prefix}" name="reviewer_model">${models.map(model=>`<option value="${esc(model)}" ${!custom&&model===value?'selected':''}>${esc(model)}</option>`).join('')}<option value="__custom__" ${custom?'selected':''}>Другая модель…</option></select><input id="${prefix}-custom" name="reviewer_model_custom" value="${esc(custom?value:'')}" placeholder="ID модели" aria-label="ID модели ревьюера" autocomplete="off" ${custom?'':'hidden'}>${provider.models_note?`<details class="model-catalog-info"><summary>О списке моделей</summary><p class="model-catalog-note">${esc(provider.models_note)}</p></details>`:''}</div>`;
 }
 function chosenReviewer(context='launch') {
   const manual=context==='manual',f=manual?null:$('#launch-form'),prefix=manual?'manual-reviewer-model':'reviewer-model';
@@ -157,14 +178,16 @@ async function enableProvider(id) {
 function displayCase(d,row) {const saved=d.cases?.find(c=>c.id===row?.case),current=caseMetadata(row?.case);return {...(current||{}),...(saved||{}),id:row?.case,title:saved?.title||current?.title||'Неизвестная задача'};}
 function stopPlay() {clearInterval(state.timer); state.playing=false;}
 function navigate(view,runId=null) {
-  stopPlay(); state.view=view; state.runOpen=view==='runs'&&!!runId;
+  if(state.view==='launch')saveLaunchDraft();
+  if(state.view==='manual')saveManualDraft();
+  stopPlay(); state.view=view; state.runOpen=view==='runs'&&!!runId;state.taskId=view==='tasks'?runId:null;
   if(view==='manual'&&runId&&state.manual.runId!==runId) {
     saveManualDraft();state.manual={caseId:'owner',source:null,runId,selected:null,pending:false,error:'',loadedRun:null};restoreManualDraft(runId);
   }
   if(runId&&view==='runs')state.run=runId;
-  location.hash=state.runOpen?'runs/'+encodeURIComponent(runId):view==='manual'&&state.manual.runId?'manual/'+encodeURIComponent(state.manual.runId):view;
-  document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  $('#breadcrumb').textContent={demo:'Демонстрация',runs:'Все эксперименты',launch:'Новый запуск',manual:'Ручная проверка'}[view];
+  location.hash=state.runOpen?'runs/'+encodeURIComponent(runId):view==='tasks'&&runId?'tasks/'+encodeURIComponent(runId):view==='manual'&&state.manual.runId?'manual/'+encodeURIComponent(state.manual.runId):view;
+  document.querySelectorAll('.rail-nav .nav-button').forEach(b=>{const active=b.dataset.view===view;b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
+  $('#breadcrumb').textContent={demo:'Демонстрация',runs:'История экспериментов',launch:'Новый запуск',manual:'Свой код',tasks:'Задачи'}[view];
   render();
   window.scrollTo({top:0,behavior:'instant'});
 }
@@ -173,13 +196,15 @@ function currentRoute() {
   if(!view)return {view:'demo',runId:null};
   let runId=null;
   try{if(['runs','manual'].includes(view)&&parts.length)runId=decodeURIComponent(parts.join('/'));}catch{}
-  return {view:['demo','runs','launch','manual'].includes(view)?view:'runs',runId};
+  let taskId=null;try{if(view==='tasks'&&parts.length)taskId=decodeURIComponent(parts.join('/'));}catch{}
+  return view==='tasks'?{view,runId,taskId}:{view:['demo','runs','launch','manual'].includes(view)?view:'runs',runId};
 }
 function render() {
   if(!state.data) return;
   if(state.view==='demo') renderDemo();
   else if(state.view==='runs') renderRuns();
   else if(state.view==='manual') renderManual();
+  else if(state.view==='tasks') renderTasks();
   else renderLaunch();
 }
 function syntax(line) {
@@ -720,9 +745,15 @@ function launchPlan(preset,n,r,effort,caseId,models={}) {
     result:screen?`До ${r} ${r===1?'нового ответа':'новых ответов'} ${reviewer}: одобрить (PASS) или отклонить (BLOCK). Сохранятся объяснения и тесты.`:`До ${checks} кандидатов с кодом и тестами. Для допущенных к ревью — решение модели и объяснение.`,
     budget:screen?`2 контроля + ${r} ${r===1?'проверка':'проверки'} готового патча.`:`2 контроля + до ${checks} генераций и ${checks} ревью. Неподходящие кандидаты пропускают ревью.`};
 }
+function saveLaunchDraft() {
+  const f=$('#launch-form');if(!f?.elements)return;
+  state.launchDraft=Object.fromEntries(['preset','case','attacker_model','effort','attempts','repeats'].filter(key=>f.elements[key]).map(key=>[key,f.elements[key].value]));
+}
 function renderLaunch() {
   const p=selectedProvider();
   $('#main').innerHTML=`<section class="launch-page"><div class="page-head"><div><h1>Новая проверка</h1><p class="subtitle" id="launch-subtitle">В готовом коде есть ошибка. Посмотрим, одобрит ли его модель.</p></div></div><div id="active-slot">${liveBanner()}</div><div class="launch-layout"><form id="launch-form" class="launch-settings"><div class="form-field" id="case-field">${caseChoiceMarkup('launch',state.launchCase)}</div><div id="case-provenance"></div><div class="launch-model-row">${providerMarkup('launch')}<div id="launch-model-picker">${modelPickerMarkup('launch',p)}</div></div><details class="launch-source"><summary id="launch-source-label">Посмотреть код</summary><div id="launch-source-code"></div></details><details class="launch-advanced"><summary>Режим и дополнительные настройки</summary><div class="form-field"><label for="preset">Режим проверки</label><select id="preset" name="preset"><option value="screen">Готовый патч с ошибкой</option><option value="feedback">Найти новый обход</option><option value="compare">Сравнить два способа поиска</option></select><p id="preset-note" hidden></p></div><div class="form-field" id="attacker-model-field"><label for="attacker-model">Модель генератора</label><input id="attacker-model" name="attacker_model" value="${esc(defaultModel(p,'attacker'))}" autocomplete="off"></div><div class="form-field" id="effort-field"><label for="effort">Уровень рассуждения Codex</label><select id="effort" name="effort"><option value="medium">Medium</option><option value="low">Low</option></select></div><div class="form-split"><div class="form-field" id="attempts-field"><label for="attempts">Новых патчей в серии</label><select id="attempts" name="attempts">${[1,2,3,4].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div><div class="form-field"><label for="repeats" id="repeats-label">Сколько раз проверить патч</label><select id="repeats" name="repeats"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option></select></div></div><p>Один вызов — до 10 минут. Лимит запуска — 300 000 известных токенов.</p></details><button class="text-button launch-manual-link" type="button" data-view="manual">Хочу вставить свой патч →</button></form><aside class="launch-preview" aria-label="План запуска"><h2>Что получите</h2><p id="launch-model-summary" class="launch-model-summary"></p><div id="launch-plan" aria-live="polite"></div><small id="budget-note" hidden></small><div id="launch-error"></div><div class="launch-submit"><p class="launch-cost">До <strong id="call-budget">3</strong> вызовов модели. Расходуется квота или баланс вашего провайдера.</p><button type="submit" form="launch-form" class="button primary" id="start-button" ${state.data.active.running?'disabled':''}>Запустить проверку</button></div></aside></div></section>`;
+  const f=$('#launch-form');
+  if(state.launchDraft&&f?.elements)for(const [key,value] of Object.entries(state.launchDraft))if(f.elements[key])f.elements[key].value=value;
   updateForm();
 }
 function updateForm(changed='') {
@@ -743,14 +774,14 @@ function updateForm(changed='') {
   state.launchCase=f.elements.case.value;
   $('#launch-case-title').textContent=caseTitle(state.launchCase);
   $('#launch-case-label').textContent='Задача'+(isMonitoringCase({id:state.launchCase})?' · MonitoringBench':'');
-  $('#rule-note').textContent=caseRule(state.launchCase);
-  $('#launch-case-violation').innerHTML=casePreviewMarkup(state.launchCase,'launch',preset);
+  $('#rule-note').textContent=caseCopy(state.launchCase)?.summary||caseRule(state.launchCase);
+  const detailsButton=$('#launch-case-details');if(detailsButton?.dataset)detailsButton.dataset.taskId=state.launchCase;
   $('#launch-case-button').disabled=state.launchPending;
   $('#attempts-field').hidden=preset!=='feedback';
   $('#attacker-model-field').hidden=preset==='screen';$('#effort-field').hidden=p.id!=='codex';$('#case-field').hidden=false;
   $('#repeats-label').textContent=preset==='screen'?'Сколько раз проверить патч':'Сколько раз повторить серию';
   const c=state.data.cases.find(c=>c.id===f.elements.case.value);
-  $('#case-provenance').innerHTML=caseProvenance(c);
+  $('#case-provenance').innerHTML='';
   const source=preset==='screen'?(c?.id==='owner'?state.data.launch_candidate:c?.seed):c?.original;
   $('#launch-source-label').textContent=preset==='screen'?(c?.id==='owner'?'Посмотреть код с ошибкой':'Посмотреть код с ошибкой'):'Посмотреть исходный код';
   $('#launch-source-code').innerHTML=source?codeView(source):'<p class="small-note">Код пока недоступен.</p>';
@@ -772,10 +803,10 @@ async function showTrace(run,call) {
   if(!$('#trace-dialog').open)$('#trace-dialog').showModal();
 }
 document.addEventListener('click',async event=>{
+  if(!event.target.closest('.rail-help'))$('.rail-help')?.removeAttribute?.('open');
   const b=event.target.closest('button'); if(!b || b.disabled)return;
   try {
-    if(b.dataset.caseOption){const context=state.casePicker;selectCase(context,b.dataset.caseOption);closeCasePicker();return;}
-    if(b.dataset.view){if(b.dataset.view==='demo')state.demoMode='welcome';navigate(b.dataset.view);return;}
+    if(b.dataset.view){event.target.closest('.rail-help')?.removeAttribute?.('open');if(b.dataset.view==='demo')state.demoMode='welcome';navigate(b.dataset.view);return;}
     if(b.dataset.manualAttempt){selectManualAttempt(b.dataset.manualAttempt);return;}
     if(b.dataset.stage!==undefined){openGuideStage(Number(b.dataset.stage));return;}
     if(b.dataset.filter){state.runFilter=b.dataset.filter;state.runOpen=false;renderRuns();return;}
@@ -795,6 +826,13 @@ document.addEventListener('click',async event=>{
     if(b.dataset.trace){await showTrace(b.dataset.traceRun,b.dataset.trace);return;}
     const action=b.dataset.action;
     if(action==='choose-case'){openCasePicker(b.dataset.caseContext);}
+    else if(action==='task-details'){openTaskDetails(b.dataset.taskId,b.dataset.context);}
+    else if(action==='task-library-back'){
+      if(b.dataset.context&&state.casePicker===b.dataset.context){
+        if(state.launchPending||b.dataset.context==='manual'&&(state.manual.runId||state.manual.pending||state.manualRequestPending))closeCasePicker();else openCasePicker(b.dataset.context);
+      }else navigate('tasks');
+    }
+    else if(action==='use-task'){useTask(b.dataset.taskId,b.dataset.context);}
     else if(action==='close-case-picker'){closeCasePicker();}
     else if(action==='refresh-providers'){await refreshProviders();}
     else if(action==='manual-local-check'){await submitManual(true);}
@@ -816,6 +854,8 @@ document.addEventListener('click',async event=>{
     else if(action==='toggle-filters'){state.filtersExpanded=!state.filtersExpanded;renderRunList();$('.filters-toggle').focus();}
     else if(action==='reset-filters'){state.runQuery='';state.runFilter='all';state.runCase='all';state.runStatus='all';state.runEffort='all';renderRuns();}
     else if(action==='start-guide') {
+      event.target.closest('.rail-help')?.removeAttribute?.('open');
+      if(state.view!=='demo')navigate('demo');
       const featured=state.data.featured;if(featured&&state.details.get(featured)?.rows){state.demoRun=featured;state.demoAttempt=null;}
       state.tab='snippet';openGuideStage(0);
     } else if(action==='guide-home'||action==='guide-back'&&state.stage===0){stopPlay();state.demoMode='welcome';state.stage=0;renderDemo();window.scrollTo({top:0,behavior:'instant'});}
@@ -831,6 +871,7 @@ document.addEventListener('click',async event=>{
     }
   } catch(error){toast(error.message);b.disabled=false;}
 });
+document.addEventListener('keydown',event=>{if(event.key==='Escape')$('.rail-help')?.removeAttribute?.('open');});
 document.addEventListener('input',e=>{
   if(['reviewer-model-custom','manual-reviewer-model-custom'].includes(e.target.id)){const context=e.target.id.startsWith('manual')?'manual':'launch';updateReviewerChoice(context);if(context==='launch')updateForm();else updateManualControls();}
   if(e.target.id==='manual-source'){state.manual.source=e.target.value;saveManualDraft();updateManualControls();}
@@ -876,11 +917,11 @@ $('#present-button').addEventListener('click',()=>{document.body.classList.toggl
 $('#close-trace').addEventListener('click',()=>$('#trace-dialog').close());
 $('#case-dialog').addEventListener('close',()=>{state.casePicker=null;});
 window.addEventListener('hashchange',async()=>{
-  const {view,runId}=currentRoute();
-  const different=state.view!==view||(view==='runs'&&(state.runOpen!==!!runId||(runId&&state.run!==runId)))||(view==='manual'&&runId&&state.manual.runId!==runId);
+  const {view,runId,taskId}=currentRoute();
+  const different=state.view!==view||(view==='runs'&&(state.runOpen!==!!runId||(runId&&state.run!==runId)))||(view==='manual'&&runId&&state.manual.runId!==runId)||(view==='tasks'&&state.taskId!==taskId);
   if(different){
     if(view==='runs'&&runId&&state.run!==runId)resetAttemptBrowser();
-    navigate(view,runId);
+    navigate(view,view==='tasks'?taskId:runId);
     if(runId){try{await detail(runId);if(state.view==='runs'&&state.runOpen&&state.run===runId)renderRuns();if(state.view==='manual'&&state.manual.runId===runId)renderManual();}catch(error){toast(error.message);}}
   }
 });
@@ -888,6 +929,7 @@ async function pollOnce() {
   const previous=JSON.stringify(state.data?.active), previousRuns=JSON.stringify(state.data?.runs);
   const data=await api('/api/state');state.data=data;
   $('#connection-dot').classList.remove('offline');$('#connection-label').textContent='Сервер подключён';$('#run-count').textContent=data.runs.length;
+  if($('#task-count'))$('#task-count').textContent=data.cases.length;
   if(state.run && state.view==='runs' && state.runOpen) {
     const selected=state.run,old=JSON.stringify(state.details.get(selected));
     try{await detail(selected);}catch(error){if(data.active.id!==selected)throw error;}
@@ -919,7 +961,7 @@ async function init() {
     state.run=route.runId||(state.data.runs.some(r=>r.id===state.data.featured)?state.data.featured:state.data.runs[0]?.id);
     state.demoRun=state.data.runs.some(r=>r.id===state.data.featured)?state.data.featured:state.data.runs.find(r=>r.manifest.cases.includes('owner')&&r.manifest.status==='completed')?.id;
     await Promise.all([...new Set([state.run,state.demoRun,...replicationIds])].filter(id=>id&&state.data.runs.some(r=>r.id===id)).map(id=>detail(id)));
-    navigate(route.view,route.runId);
+    navigate(route.view,route.view==='tasks'?route.taskId:route.runId);
     poll();
   } catch(error){$('#main').innerHTML=`<div class="error-box">Не удалось открыть данные: ${esc(error.message)}. Проверьте, что сервер запущен командой python3 run.py ui.</div>`;}
 }

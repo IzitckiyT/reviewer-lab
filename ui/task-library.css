@@ -1,0 +1,111 @@
+/* One aligned catalog, with the explanation one deliberate click away. */
+.task-library,.task-detail {--task-ink:#252c38;--task-muted:#6e7888;--task-line:#e3e7ed;--task-blue:#1769db;--task-paper:#fff;color:var(--task-ink);max-width:100%;min-width:0}
+.task-library {display:grid;gap:28px}
+.task-library-group {min-width:0}
+.task-library-group-head {display:flex;align-items:center;gap:9px;margin:0 0 10px;padding:0 2px;min-height:24px}
+.task-library-group-head h2 {color:#616c7c;font:500 12px/1.5 var(--sans);letter-spacing:.01em}
+.task-library-count {color:#929aa6;font:400 11px/1.5 var(--mono)}
+.task-library-source {margin-left:auto;color:#8490a1;font-size:11px}
+.task-library-rows {border:1px solid var(--task-line);border-radius:9px;background:var(--task-paper);overflow:hidden}
+.task-library-row {display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:15px;width:100%;min-width:0;min-height:78px;margin:0;padding:17px 20px;border:0;border-bottom:1px solid var(--task-line);background:var(--task-paper);color:inherit;text-align:left;transition:background .12s ease}
+.task-library-row:last-child {border-bottom:0}
+.task-library-row:hover {background:#f7f9fc}
+.task-library-row:focus-visible {outline:2px solid var(--task-blue);outline-offset:-3px;border-radius:4px}
+.task-library-row.is-selected {background:#f5f8fd}
+.task-library-number {align-self:start;padding-top:1px;color:#a1a9b5;font:400 11px/1.7 var(--mono)}
+.task-library-copy {display:grid;gap:4px;min-width:0}
+.task-library-title {color:#344055;font-size:14px;line-height:1.5;font-weight:500}
+.task-library-summary {color:var(--task-muted);font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.task-library-row-end {display:flex;align-items:center;gap:12px;color:#99a3b1}
+.task-library-row:hover .task-library-row-end {color:var(--task-blue)}
+.task-library-selected {color:#477ab8;font-size:10px;font-weight:500;white-space:nowrap}
+.task-library-footnote {margin:0 2px;color:#8b94a2;font-size:11px;line-height:1.7}
+.task-library-empty {gap:8px;padding:30px 0}
+.task-library-empty h2 {font-size:17px;font-weight:500}
+.task-library-empty p {color:var(--task-muted);font-size:13px}
+
+.task-detail {max-width:830px}
+.task-detail-top {display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}
+.task-detail-back {display:inline-flex;align-items:center;gap:8px;min-height:30px;padding:4px 0;border:0;background:transparent;color:#768294;font:400 12px/1.5 var(--sans)}
+.task-detail-back:hover {color:var(--task-blue)}
+.task-detail-selected {color:#6c83a0;font-size:11px;line-height:1.5}
+.task-detail-heading {max-width:740px;margin-bottom:28px}
+.task-detail-category {display:flex;align-items:center;flex-wrap:wrap;gap:8px 17px;margin-bottom:12px;color:#8a94a3;font-size:11px;line-height:1.5}
+.task-detail-category span+span {padding-left:17px;border-left:1px solid var(--task-line)}
+.task-detail-heading h1 {max-width:720px;color:var(--task-ink);font:500 29px/1.24 var(--sans);letter-spacing:-.025em;text-wrap:balance}
+.task-detail-heading>p {margin-top:15px;color:#737f90;font-size:14px;line-height:1.85;max-width:670px}
+.task-detail-rules {display:grid;grid-template-columns:1fr 1fr;gap:28px;padding:24px 0;border-top:1px solid var(--task-line);border-bottom:1px solid var(--task-line)}
+.task-detail-rules section {min-width:0}
+.task-detail-label {display:block;color:#8e98a6;font-size:10px;line-height:1.5}
+.task-detail-rules h2 {margin-top:7px;color:#344055;font:500 14px/1.5 var(--sans)}
+.task-detail-rules p {margin-top:9px;color:#6e798a;font-size:13px;line-height:1.8;overflow-wrap:anywhere}
+.task-detail-example {margin-top:25px;padding:22px 24px;border:1px solid #e5eaf1;border-radius:8px;background:#f8fafd}
+.task-detail-example-heading {display:flex;align-items:center;justify-content:space-between;gap:15px}
+.task-detail-scenarios {color:#97a0ac;font-size:10px;line-height:1.5}
+.task-detail-situation {margin-top:12px;color:#48566c;font-size:13px;line-height:1.8;overflow-wrap:anywhere}
+.task-detail-comparison {display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:19px;padding-top:17px;border-top:1px solid #e2e8f0}
+.task-detail-comparison>div {min-width:0}
+.task-detail-comparison span {display:block;color:#8c96a5;font-size:11px;line-height:1.5}
+.task-detail-comparison strong {display:block;margin-top:5px;color:#3c536e;font:500 14px/1.6 var(--sans)}
+.task-detail-comparison>div+div strong {color:#a16668}
+.task-detail-why {max-width:740px;margin-top:16px;color:#8791a0;font-size:12px;line-height:1.8}
+.task-detail-outcome {margin-top:25px}
+.task-detail-outcome h2 {color:#4a576b;font:500 13px/1.5 var(--sans)}
+.task-detail-outcome p {max-width:680px;margin-top:7px;color:#818c9d;font-size:12px;line-height:1.8}
+.task-detail-source {margin-top:25px;padding-top:17px;border-top:1px solid var(--task-line)}
+.task-detail-source>summary {display:flex;align-items:center;justify-content:space-between;gap:20px;cursor:pointer;list-style:none;color:#8a94a3;font-size:11px;line-height:1.8}
+.task-detail-source>summary::-webkit-details-marker {display:none}
+.task-detail-source>summary::after {content:'+';color:#8c97a7;font:15px/1.5 var(--sans)}
+.task-detail-source[open]>summary::after {content:'−'}
+.task-detail-source>summary:hover {color:var(--task-blue)}
+.task-detail-source>div {margin-top:13px;color:#8791a1;font-size:11px;line-height:1.85}
+.task-detail-source-links {display:flex;gap:10px 20px;flex-wrap:wrap;margin-top:11px}
+.task-detail-source a {color:#718ba9;text-decoration:none;text-underline-offset:3px}
+.task-detail-source a:hover {text-decoration:underline}
+.task-detail-source dl {display:grid;gap:5px;margin:13px 0 0}
+.task-detail-source dl>div {display:grid;grid-template-columns:108px minmax(0,1fr);gap:14px}
+.task-detail-source dt {color:#9aa2ae}
+.task-detail-source dd {margin:0;color:#7c8799;overflow-wrap:anywhere}
+.task-detail-footer {display:flex;justify-content:flex-start;margin-top:27px}
+.task-detail-use.button {gap:18px;min-height:42px;padding:10px 17px;border-radius:6px;font-size:12px;font-weight:500}
+.task-detail-use svg {width:15px;height:15px}
+.task-detail-footer p {margin-top:9px;color:#9aa2ae;font-size:10px;line-height:1.6}
+.task-detail-unavailable .task-detail-heading {margin-top:28px}
+
+/* The same catalog fits the chooser without becoming a second interface. */
+#case-dialog .task-library {gap:20px}
+#case-dialog .task-library-row {min-height:66px;padding:12px 17px}
+#case-dialog .task-library-footnote {display:none}
+#case-dialog .task-detail {padding-top:1px}
+#case-dialog .task-detail-top {margin-bottom:20px}
+#case-dialog .task-detail-heading h1 {font-size:25px}
+#case-dialog .task-detail-heading>p {font-size:13px}
+#case-dialog .task-detail-rules {gap:24px;padding:20px 0}
+#case-dialog .task-detail-footer {position:sticky;bottom:-22px;z-index:1;margin-top:20px;padding:17px 0 12px;border-top:1px solid #e8ecf1;background:#fff}
+#case-dialog .task-detail-footer>div {width:100%}
+#case-dialog .task-detail-footer>div>button {width:100%;justify-content:center}
+
+@media(max-width:680px) {
+ .task-library {gap:23px}
+ .task-library-row,#case-dialog .task-library-row {grid-template-columns:21px minmax(0,1fr) 16px;gap:10px;padding:15px 13px;min-height:76px}
+ .task-library-title {font-size:13px}
+ .task-library-summary {font-size:11px}
+ .task-library-row-end {justify-content:flex-end}
+ .task-library-selected {display:none}
+ .task-detail-top {margin-bottom:23px}
+ .task-detail-heading h1,#case-dialog .task-detail-heading h1 {font-size:25px}
+ .task-detail-heading>p {font-size:13px}
+ .task-detail-rules {gap:20px}
+ .task-detail-rules p {font-size:12px}
+ .task-detail-example {padding:18px}
+ .task-detail-comparison {gap:17px}
+ .task-detail-comparison strong {font-size:13px}
+}
+@media(max-width:440px) {
+ .task-detail-rules {grid-template-columns:1fr;gap:20px}
+ .task-detail-comparison {grid-template-columns:1fr;gap:16px}
+ .task-detail-heading h1,#case-dialog .task-detail-heading h1 {font-size:23px}
+ .task-library-source {font-size:10px}
+ .task-detail-selected {font-size:10px}
+}
+@media(prefers-reduced-motion:reduce) {.task-library-row {transition:none}}

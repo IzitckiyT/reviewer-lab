@@ -281,12 +281,19 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertLess(body.index(b'src="/case-copy.js"'), body.index(b'src="/test-explanation.js"'))
         self.assertLess(body.index(b'src="/test-explanation.js"'), body.index(b'src="/app.js"'))
-        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView')]:
+        self.assertLess(body.index(b'src="/case-copy.js"'), body.index(b'src="/task-library.js"'))
+        self.assertLess(body.index(b'src="/task-library.js"'), body.index(b'src="/app.js"'))
+        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView'), ('task-library.js', b'LabTaskLibrary')]:
             code, headers, body = self.request('/' + name)
             self.assertEqual(code, 200)
             self.assertEqual(headers['Content-Type'], 'text/javascript; charset=utf-8')
             self.assertIn(marker, body)
         self.assertEqual(self.request('/../case-copy.js')[0], 404)
+        for name in ('task-library.css', 'navigation.css'):
+            code, headers, _ = self.request('/' + name)
+            self.assertEqual(code, 200)
+            self.assertEqual(headers['Content-Type'], 'text/css; charset=utf-8')
+        self.assertEqual(self.request('/../task-library.js')[0], 404)
 
     def test_cross_origin_and_missing_token_cannot_start_run(self):
         payload=dict(preset='feedback',case='owner',effort='medium',attempts=2,repeats=1)

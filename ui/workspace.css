@@ -1023,3 +1023,61 @@ dialog::backdrop {background:#292a2d40}
 }
 
 .model-catalog-note {margin:9px 0 0;color:#8a95a3;font:11px/1.6 var(--sans)}
+
+/* A short setup surface; the full story belongs in the task library. */
+.tasks-page {max-width:940px}
+.tasks-page>.page-head {margin-bottom:32px}
+.tasks-page .subtitle {margin-top:10px;color:#7c8797;font-size:14px;line-height:1.7}
+.launch-page .launch-layout {grid-template-columns:minmax(0,1.25fr) minmax(290px,.85fr);gap:24px}
+.launch-page #launch-form.launch-settings,.launch-page .launch-preview {padding:25px 26px;border:1px solid #e7eaf0;border-radius:9px}
+.launch-page .launch-model-row {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px;margin-bottom:23px}
+.launch-page .launch-model-row>* {min-width:0}
+.launch-page .launch-model-row .form-field,.launch-page .launch-model-row .provider-picker {margin:0}
+.launch-page .launch-model-row label {display:block;min-height:18px;margin:0 0 9px;color:#657284;font:500 12px/1.5 var(--sans)}
+.launch-page .launch-model-row select {width:100%;height:42px;min-width:0;padding:9px 10px;background:#fff;border:1px solid #dfe5ec;border-radius:5px;font:12px/1.5 var(--sans);color:#415067}
+.launch-page .case-choice {padding:0 0 21px;border:0;border-bottom:1px solid #e8ecf1;border-radius:0}
+.launch-page .case-choice-heading {margin-bottom:16px}
+.launch-page .case-choice>strong {font-size:20px;line-height:1.4}
+.launch-page #case-field .case-choice-rule {margin:9px 0 0;color:#7b8797;font-size:13px;line-height:1.75}
+.case-choice-actions {margin-top:14px}
+.case-choice-actions .text-button {color:#4c78a8;font-size:11px;line-height:1.7}
+.case-choice-actions .text-button>span {margin-left:8px;color:#859bb4}
+.launch-page .launch-result-copy {font-size:14px;line-height:1.8;color:#5b6b81}
+.launch-page .launch-preview h2 {font-size:18px;color:#39485e}
+.launch-page .launch-model-summary {margin:12px 0 21px;font:11px/1.8 var(--mono);color:#8696a9}
+.launch-page .launch-source>summary,.launch-page .launch-advanced>summary {font-size:12px;color:#7b8797}
+.launch-page .launch-manual-link {margin-top:22px;font-size:11px}
+.model-catalog-info {margin-top:10px;color:#8a95a3;font:11px/1.75 var(--sans)}
+.model-catalog-info>summary {cursor:pointer;color:#71849c}
+.launch-page .launch-model-row .model-catalog-note {margin-top:10px;font-size:11px;color:#8a95a3}
+.launch-page .launch-source {margin:0}
+.launch-page .launch-advanced {padding-top:11px}
+.launch-page .provider-connection {display:flex;flex-wrap:wrap;align-items:baseline;gap:0 13px}
+.launch-page .provider-connection-status {flex-basis:100%}
+.launch-page .provider-connection-help[open] {flex-basis:100%}
+.launch-page .launch-submit .button.primary {font-size:13px;min-height:43px;border-radius:6px}
+#case-dialog {inset:0;margin:auto;width:min(760px,calc(100vw - 36px));max-width:calc(100vw - 36px);height:fit-content;max-height:calc(100dvh - 48px);padding:27px 29px 22px}
+#case-dialog.showing-task-detail .case-dialog-top {position:absolute;top:28px;right:29px;margin:0;justify-content:flex-end;z-index:2}
+#case-dialog.showing-task-detail .task-detail-top {padding-right:35px}
+#case-dialog.showing-task-detail .case-dialog-top>div {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+#case-dialog.showing-task-detail .case-dialog-note {display:none}
+@media(max-width:1100px) {
+ .launch-page .launch-layout {grid-template-columns:minmax(0,1.1fr) minmax(275px,.9fr);gap:18px}
+ .launch-page #launch-form.launch-settings,.launch-page .launch-preview {padding:22px}
+ .launch-page .launch-model-row {grid-template-columns:minmax(0,1fr);gap:19px}
+}
+@media(max-width:900px) {
+ .launch-page {max-width:760px}
+ .launch-page .launch-layout {grid-template-columns:minmax(0,1fr);gap:18px}
+ .launch-page .launch-model-row {grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+}
+@media(max-width:580px) {
+ .launch-page .launch-model-row {grid-template-columns:minmax(0,1fr);gap:19px}
+ .launch-page #launch-form.launch-settings,.launch-page .launch-preview {padding:21px 18px}
+ .launch-page .case-choice>strong {font-size:18px}
+ .case-choice-heading {align-items:flex-start;gap:9px}
+ .case-choice-button {font-size:10px;gap:6px}
+ .case-choice-label {font-size:10px}
+ .tasks-page>.page-head {margin-bottom:25px}
+ #case-dialog {padding:22px 19px 19px}
+}

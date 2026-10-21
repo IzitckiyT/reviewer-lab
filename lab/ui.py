@@ -453,6 +453,9 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                           "/provider-setup.js": ("provider-setup.js", "text/javascript; charset=utf-8"),
                           "/run-story.js": ("run-story.js", "text/javascript; charset=utf-8"),
                           "/run-story.css": ("run-story.css", "text/css; charset=utf-8"),
+                          "/task-library.js": ("task-library.js", "text/javascript; charset=utf-8"),
+                          "/task-library.css": ("task-library.css", "text/css; charset=utf-8"),
+                          "/navigation.css": ("navigation.css", "text/css; charset=utf-8"),
                           "/style.css": ("style.css", "text/css; charset=utf-8"),
                           "/fonts.css": ("fonts.css", "text/css; charset=utf-8"),
                           "/workspace.css": ("workspace.css", "text/css; charset=utf-8")}

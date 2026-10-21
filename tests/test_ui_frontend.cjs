@@ -47,7 +47,7 @@ function harness({respond, allowPost = false} = {}) {
       return {ok: true, json: async () => value};
     },
   });
-  for (const file of ['case-copy.js', 'test-explanation.js', 'provider-setup.js', 'run-story.js']) {
+  for (const file of ['case-copy.js', 'test-explanation.js', 'provider-setup.js', 'run-story.js', 'task-library.js']) {
     const helper = path.join(__dirname, '..', 'ui', file);
     if (fs.existsSync(helper)) vm.runInContext(fs.readFileSync(helper, 'utf8'), context, {filename: 'ui/' + file});
   }
@@ -1592,7 +1592,7 @@ test('ready-patch launch keeps a selected imported case and previews its control
   assert.doesNotMatch(h.node('#launch-source-code').innerHTML,/SAVED_OWNER|ORIGINAL_POLICY/);
   assert.equal(h.node('#launch-source-label').textContent,'Посмотреть код с ошибкой');
   assert.match(h.node('#rule-note').textContent,/Не разрешать незнакомые запросы/);
-  assert.match(h.node('#case-provenance').innerHTML,/MonitoringBench · policy/);
+  assert.equal(h.node('#case-provenance').innerHTML,'','Provenance belongs inside task details');
   assert.equal(h.node('#call-budget').textContent,3);
   assert.deepEqual(h.requests,[]);
 });
@@ -1796,12 +1796,17 @@ test('opening and selecting one of eight tasks preserves the provider and review
   assert.equal(h.node('#case-dialog').open,true);
   assert.equal(h.run('state.casePicker'),'launch');
   const options=h.node('#case-options').innerHTML;
-  assert.equal((options.match(/data-case-option=/g)||[]).length,8);
-  assert.match(options,/Базовые задачи/);
-  assert.match(options,/MonitoringBench · адаптации/);
-  assert.match(options,/data-case-option="owner" aria-pressed="true"/);
+  assert.equal((options.match(/data-action="task-details"/g)||[]).length,8);
+  assert.match(options,/Права и изменения/);
+  assert.match(options,/Безопасность систем/);
+  assert.doesNotMatch(options,/адаптаци/i);
+  assert.match(options,/is-selected[^]*?data-task-id="owner"/);
   assert.doesNotMatch(options,/\b(?:True|False|PASS|BLOCK|oracle)\b/);
-  await h.click({caseOption:'mb_secret_diagnostics'});
+  await h.click({action:'task-details',taskId:'mb_secret_diagnostics',context:'launch'});
+  assert.equal(fields.case.value,'owner','Reading a description must not select it');
+  assert.match(h.node('#case-options').innerHTML,/Скрытое нарушение/);
+  assert.equal(h.node('#case-dialog').open,true);
+  await h.click({action:'use-task',taskId:'mb_secret_diagnostics',context:'launch'});
   assert.equal(fields.case.value,'mb_secret_diagnostics');
   assert.equal(h.run('state.launchCase'),'mb_secret_diagnostics');
   assert.equal(h.run('state.providerId'),'claude');
@@ -1819,12 +1824,13 @@ test('manual task chooser keeps separate drafts and refuses a change in a pinned
   h.run('state.data.cases=chooserCases;state.view="manual";renderManual();state.manual.source="OWNER_DRAFT"',{chooserCases});
   await h.click({action:'choose-case',caseContext:'manual'});
   assert.equal(h.node('#case-dialog').open,true);
-  await h.click({caseOption:'mb_firewall_policy'});
+  await h.click({action:'task-details',taskId:'mb_firewall_policy',context:'manual'});
+  await h.click({action:'use-task',taskId:'mb_firewall_policy',context:'manual'});
   assert.equal(h.run('state.manual.caseId'),'mb_firewall_policy');
   assert.equal(h.run('state.manual.source'),'ORIGINAL_mb_firewall_policy');
   h.run('state.manual.source="POLICY_DRAFT"');
   await h.click({action:'choose-case',caseContext:'manual'});
-  await h.click({caseOption:'owner'});
+  await h.click({action:'use-task',taskId:'owner',context:'manual'});
   assert.equal(h.run('state.manual.source'),'OWNER_DRAFT');
   h.run('state.manual.runId="pinned-series"');
   await h.click({action:'choose-case',caseContext:'manual'});
@@ -1854,5 +1860,103 @@ test('all eight result renderings name the forbidden action separately from the 
     assert.match(manual.split('<details')[0],/Правило в коде[^]*Правило нарушено[^]*Решение модели[^]*Одобрила код/);
     assert.doesNotMatch(manual.split('<details')[0],/\b(?:True|False|PASS|FAIL|BLOCK)\b|decision\(/);
   }
+  assert.deepEqual(h.requests,[]);
+});
+
+test('choosing a task from its page preserves the entire prepared experiment without starting it',async()=>{
+  const h=harness();
+  launchFields(h,{preset:'feedback',case:'audit',attempts:'3',repeats:'2',effort:'low',attacker_model:'my-generator',provider:'claude',reviewer_model:'opus'});
+  h.run('state.data.cases=chooserCases;state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="opus";state.view="launch";renderLaunch()',{chooserCases,fixtures:providerFixtures});
+  await h.click({view:'tasks'});
+  assert.equal(h.run('state.view'),'tasks');
+  await h.click({action:'task-details',taskId:'mb_secret_diagnostics'});
+  assert.equal(h.run('state.taskId'),'mb_secret_diagnostics');
+  assert.equal(h.run('state.launchCase'),'audit','reading details must not change the prepared task');
+  // Navigation destroys the real launch form; model that with fresh default controls.
+  const restored=launchFields(h,{provider:'claude',reviewer_model:'opus',attacker_model:'sonnet',repeats:'1'});
+  await h.click({action:'use-task',taskId:'mb_secret_diagnostics'});
+  assert.equal(h.run('state.view'),'launch');
+  for(const [name,value] of Object.entries({preset:'feedback',case:'mb_secret_diagnostics',attempts:'3',repeats:'2',effort:'low',attacker_model:'my-generator'})) {
+    assert.equal(restored[name].value,value,name+' survives the catalogue round trip');
+  }
+  assert.equal(h.run('state.providerId'),'claude');
+  assert.equal(h.run('reviewerValue()'),'opus');
+  assert.match(h.node('#main').innerHTML,/<option value="opus" selected>/);
+  assert.match(h.node('#launch-model-summary').textContent,/opus.*my-generator/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('reading another task and returning to the chooser never silently selects or resets launch options',async()=>{
+  const h=harness(),fields=launchFields(h,{preset:'compare',case:'snapshot',repeats:'3',effort:'low',attacker_model:'custom-generator',reviewer_model:'gpt-6.1-sol'});
+  h.run('state.data.cases=chooserCases;state.view="launch";renderLaunch()',{chooserCases});
+  const before=Object.fromEntries(Object.entries(fields).map(([name,field])=>[name,field.value]));
+  await h.click({action:'choose-case',caseContext:'launch'});
+  await h.click({action:'task-details',taskId:'mb_malware_chain',context:'launch'});
+  assert.match(h.node('#case-options').innerHTML,/Чужой файл под видом проверки/);
+  await h.click({action:'task-library-back',context:'launch'});
+  assert.equal((h.node('#case-options').innerHTML.match(/data-action="task-details"/g)||[]).length,8);
+  assert.match(h.node('#case-options').innerHTML,/is-selected[^]*?data-task-id="snapshot"/);
+  await h.click({action:'close-case-picker'});
+  assert.equal(h.node('#case-dialog').open,false);
+  for(const [name,value] of Object.entries(before))assert.equal(fields[name].value,value,name);
+  assert.equal(h.run('state.launchCase'),'snapshot');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('opening manual task explanations preserves the current editor and an unsent patch',async()=>{
+  const h=harness();
+  h.run('state.data.cases=chooserCases;state.view="manual";renderManual()',{chooserCases});
+  const editor=h.node('#manual-source');
+  editor.value='def decision(role, approved):\n    return approved and role == "owner"\n';
+  editor.selectionStart=27;editor.selectionEnd=35;editor.scrollTop=46;
+  await h.emit('input',{target:{id:'manual-source',value:editor.value}});
+  const mainBefore=h.node('#main').innerHTML;
+  await h.click({action:'task-details',taskId:'owner',context:'manual'});
+  assert.match(h.node('#case-options').innerHTML,/Вернуться к своему коду/);
+  await h.click({action:'task-library-back',context:'manual'});
+  await h.click({action:'task-details',taskId:'mb_secret_diagnostics',context:'manual'});
+  assert.equal(h.run('state.manual.caseId'),'owner');
+  assert.equal(h.run('state.manual.source'),editor.value);
+  await h.click({action:'close-case-picker'});
+  assert.equal(h.node('#manual-source'),editor,'reading descriptions must not recreate the editor');
+  assert.equal(h.node('#main').innerHTML,mainBefore);
+  assert.equal(editor.selectionStart,27);assert.equal(editor.selectionEnd,35);assert.equal(editor.scrollTop,46);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('a completed pinned manual series explains its lock and rejects a stale task-selection action',async()=>{
+  const h=harness();
+  const saved={...detail,id:'completed-manual',manifest:{...detail.manifest,status:'completed',experiment_kind:'manual',cases:['owner'],provider:'claude'},rows:[],calls:[]};
+  h.run('state.data.cases=chooserCases;state.data.providers=fixtures;state.view="manual";state.details.set(saved.id,saved);state.manual.runId=saved.id;state.manual.source="MY_UNSENT_PATCH";renderManual()',{chooserCases,fixtures:providerFixtures,saved});
+  await h.click({action:'task-details',taskId:'owner',context:'manual'});
+  const description=h.node('#case-options').innerHTML;
+  assert.match(description,/Задача закреплена за серией/);
+  assert.match(description,/data-action="use-task"[^>]* disabled/);
+  assert.doesNotMatch(description,/дождитесь завершения текущего запуска/);
+  await h.click({action:'use-task',taskId:'mb_firewall_policy',context:'manual'});
+  assert.equal(h.run('state.manual.caseId'),'owner');
+  assert.equal(h.run('state.manual.runId'),saved.id);
+  assert.equal(h.run('state.manual.source'),'MY_UNSENT_PATCH');
+  await h.click({action:'task-library-back',context:'manual'});
+  assert.equal(h.node('#case-dialog').open,false);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('unknown task deep links stay safe and ordinary catalogue navigation never calls a model',async()=>{
+  const h=harness();
+  h.run('state.data.cases=chooserCases;state.launchCase="audit";navigate("tasks",untrusted)',{chooserCases,untrusted:'<img src=x onerror=bad()>'});
+  assert.match(h.node('#main').innerHTML,/Задача недоступна/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-action="use-task"|<img/);
+  await h.click({action:'use-task',taskId:'<img src=x onerror=bad()>'});
+  assert.equal(h.run('state.launchCase'),'audit');
+  assert.equal(h.run('state.view'),'tasks');
+  await h.click({action:'task-library-back'});
+  assert.equal(h.run('state.taskId'),null);
+  assert.equal((h.node('#main').innerHTML.match(/data-action="task-details"/g)||[]).length,8);
+  await h.click({action:'task-details',taskId:'mb_firewall_policy'});
+  assert.match(h.node('#main').innerHTML,/Опечатка открывает доступ/);
+  assert.equal(h.run('state.launchCase'),'audit');
+  await h.click({action:'task-library-back'});
+  assert.equal(h.run('state.launchCase'),'audit');
   assert.deepEqual(h.requests,[]);
 });
