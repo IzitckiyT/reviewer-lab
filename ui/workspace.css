@@ -998,7 +998,28 @@ dialog::backdrop {background:#292a2d40}
 .launch-controls-note {margin-top:16px;color:#8a95a3;font-size:12px;line-height:1.65}
 .launch-controls-note>summary {cursor:pointer}
 .launch-controls-note>p {margin:10px 0 0}
+/* The connection is a small explanation, with terminal setup kept behind one disclosure. */
+.provider-connection {font:12px/1.65 var(--sans);color:#788493}
+.provider-connection .provider-connection-status {display:flex;align-items:flex-start;gap:7px;margin:9px 0 0;color:#637183}
+.provider-connection-status>span {flex:none;width:6px;height:6px;margin-top:7px;border-radius:50%;background:#b1b9c4}
+.provider-connection-ready .provider-connection-status>span {background:#6a9d83}
+.provider-connection-pending .provider-connection-status>span {background:#b4a16c}
+.provider-connection-missing .provider-connection-status>span {background:#b08a83}
+.provider-connection .provider-connection-description {margin:6px 0 0;color:#8a95a3;font-size:11px;line-height:1.7}
+.provider-connection .provider-connection-help {margin-top:10px}
+.provider-connection-help summary {width:fit-content;cursor:pointer;color:#71849c;font-size:11px}
+.provider-connection-help ol {margin:14px 0 0;padding-left:19px}
+.provider-connection-help li+li {margin-top:13px}
+.provider-connection-help p {margin:10px 0}
+.provider-connection-help a {color:#6287b3;text-underline-offset:3px}
+.provider-connection-help pre {max-width:100%;margin:10px 0;padding:12px;border:1px solid #e7ebf0;border-radius:5px;background:#f8fafc;overflow:auto;white-space:pre;line-height:1.65;color:#607084}
+.provider-connection-help code {font:11px/1.7 var(--mono)}
+.provider-connection-help kbd {font:11px var(--mono)}
+.provider-connection-help .provider-connection-footnote {color:#8d98a6;font-size:11px}
+.provider-connection .provider-connection-refresh {margin-top:9px;font-size:11px;color:#71849c}
 @media(max-width:480px) {
  .case-example-decisions,.scenario-witness .witness {grid-template-columns:1fr;gap:12px}
  .scenario-witness .witness b {font-size:14px}
 }
+
+.model-catalog-note {margin:9px 0 0;color:#8a95a3;font:11px/1.6 var(--sans)}

@@ -7,6 +7,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -28,7 +29,7 @@ PROVIDERS = {
     "claude": {"id": "claude", "label": "Claude Code", "kind": "cli",
                "models": ["sonnet", "opus", "haiku"], "default_reviewer": "sonnet",
                "default_attacker": "sonnet", "setup": "claude auth login"},
-    "deepseek": {"id": "deepseek", "label": "DeepSeek", "kind": "api",
+    "deepseek": {"id": "deepseek", "label": "DeepSeek · API", "kind": "api",
                  "models": ["deepseek-flash", "deepseek-v4-pro"],
                  "default_reviewer": "deepseek-flash", "default_attacker": "deepseek-flash",
                  "setup": "Set DEEPSEEK_API_KEY in the server environment"},
@@ -85,14 +86,58 @@ def _cli(provider):
 
 
 def setup_status(provider="codex"):
-    """Local presence only: no inference, HTTP request, or credential-file reads."""
+    """Cheap local presence only; polling must never spawn a CLI or use HTTP."""
     spec = _provider(provider)
-    available = bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()) if provider == "deepseek" else bool(_cli(provider))
-    return {"provider": provider, "available": available, "configured": available, "ready": available,
-            "message": ("Key configured; validity and balance are checked on the first request" if provider == "deepseek"
-                        else "CLI found; login is checked before launch") if available else
-                       ("DEEPSEEK_API_KEY is missing" if provider == "deepseek" else spec["label"] + " CLI not found"),
-            "setup_command": spec["setup"]}
+    is_api = provider == "deepseek"
+    cli = None if is_api else _cli(provider)
+    available = bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()) if is_api else bool(cli)
+    executable = cli or provider
+    login_command = None if is_api else shlex.join([executable, *(["login"] if provider == "codex" else ["auth", "login"])])
+    detail = (("Ключ добавлен. Его действительность и баланс проверятся при запуске." if is_api else
+               "CLI установлен. Нажмите «Проверить подключение», чтобы проверить вход.") if available else
+              ("Ключ DEEPSEEK_API_KEY пока не добавлен в окружение сервера." if is_api else
+               spec["label"] + " пока не установлен."))
+    return {"provider": provider, "available": available, "configured": available,
+            "ready": available if is_api else False, "message": detail, "setup_command": login_command or spec["setup"],
+            "login_command": login_command,
+            "models_source": {"codex": "suggested_defaults", "claude": "claude_aliases", "deepseek": "provider_catalog"}[provider],
+            "models_note": {"codex": "Пока показаны настройки проекта. Проверка подключения загрузит список из вашего CLI.",
+                            "claude": "Sonnet, Opus и Haiku — имена семейств в Claude Code. Конкретную версию выбирает CLI; доступ проверится при запуске.",
+                            "deepseek": "Это прямое подключение к API DeepSeek. Отдельный CLI не нужен."}[provider],
+            "connection": {"status": ("configured" if is_api else "unchecked") if available else "missing",
+                           "installed": None if is_api else available, "authenticated": None,
+                           "version": None, "auth_source": "environment" if is_api and available else None,
+                           "checked_at": None, "detail": detail, "model_access_verified": False}}
+
+
+def checked_status(provider, readiness=None, error=None):
+    """Normalize an explicit read-only doctor result, excluding account identifiers."""
+    status = setup_status(provider)
+    connection = status["connection"]
+    connection["checked_at"] = now()
+    if error is not None:
+        message = str(error)
+        login_required = any(word in message.lower() for word in ("sign-in required", "sign in", "login", "logged in"))
+        connection.update(status="missing" if not status["available"] else
+                          "login_required" if login_required else "error",
+                          authenticated=False if login_required else None,
+                          detail=("Нужно войти в аккаунт. Выполните команду ниже и повторите проверку." if login_required else
+                                  "Не удалось проверить подключение. Проверьте установку CLI и повторите.") if status["available"] else status["message"])
+        status.update(ready=False, message=connection["detail"])
+        return status
+    if not readiness:
+        return status
+    if provider == "deepseek":
+        # Presence is the strongest statement available without making a request.
+        return status
+    connection.update(status="ready", authenticated=True, version=_safe(readiness.get("cli_version", ""))[:160],
+                      auth_source="ChatGPT" if provider == "codex" else
+                                  {"claude.ai": "Claude account", "oauth_token": "Claude OAuth", "api_key": "Anthropic API key",
+                                   "api_key_helper": "Anthropic API key helper"}.get(readiness.get("auth_method"), "Claude Code"),
+                      detail="Вход через ChatGPT подтверждён. Можно запускать проверку." if provider == "codex" else
+                             "Вход в Claude Code подтверждён. Можно запускать проверку.")
+    status.update(ready=True, message=connection["detail"])
+    return status
 
 
 def _safe(value):
@@ -252,6 +297,8 @@ class ClaudeTransport(_JournalTransport):
         if info.get("authMethod") == "third_party":
             raise TransportError("Third-party Claude backends are disabled. Run claude auth login.")
         return {"provider": self.provider, "authentication": "Claude Code managed login",
+                "auth_method": info.get("authMethod") if info.get("authMethod") in
+                               ("claude.ai", "oauth_token", "api_key", "api_key_helper") else None,
                 "cli_version": _safe(version.stdout.strip()), "requested_models": self.models,
                 "provider_model_attestation": "Requested aliases; actual model names are recorded after each response"}
 

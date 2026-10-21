@@ -182,16 +182,8 @@ class CodexTransport:
             return {"authentication": "ChatGPT", "cli_version": version.stdout.strip(),
                     "cli_path": self.codex, "catalog_models_present": None,
                     "provider_model_attestation": "Sign-in only; selected models are checked at launch"}
-        catalog_result = subprocess.run([self.codex, "debug", "models", "--bundled"],
-            capture_output=True, text=True, env=sanitized_env(), timeout=20)
-        try:
-            catalog = json.loads(catalog_result.stdout)
-            models = catalog["models"] if isinstance(catalog, dict) else catalog
-            slugs = {model["slug"] for model in models}
-        except (ValueError, TypeError, KeyError):
-            raise TransportError("Cannot verify the CLI model catalog; use a current Codex CLI")
-        if catalog_result.returncode:
-            raise TransportError("CLI model catalog command failed")
+        models = self.model_catalog()
+        slugs = {model["slug"] for model in models}
         missing = {model for model, _ in self.models.values()} - slugs
         if missing:
             raise TransportError(f"CLI catalog lacks {sorted(missing)}. Use a current CLI via REVIEWER_LAB_CODEX.")
@@ -199,6 +191,26 @@ class CodexTransport:
                 "cli_path": self.codex, "catalog_models_present": True,
                 "requested_models": self.models, "provider_model_attestation":
                 "CLI request configuration; JSONL does not report a provider snapshot ID"}
+
+    def model_catalog(self):
+        """Read the installed CLI's bundled catalog without starting inference.
+
+        This is a client catalog, not proof that an account can use every model.
+        Keep doctor and the dashboard on the same command and response parser.
+        """
+        catalog_result = subprocess.run([self.codex, "debug", "models", "--bundled"],
+            capture_output=True, text=True, env=sanitized_env(), timeout=20)
+        try:
+            catalog = json.loads(catalog_result.stdout)
+            models = catalog["models"] if isinstance(catalog, dict) else catalog
+            if not isinstance(models, list) or not models or any(
+                    not isinstance(model, dict) or not isinstance(model.get("slug"), str) for model in models):
+                raise ValueError
+        except (ValueError, TypeError, KeyError):
+            raise TransportError("Cannot verify the CLI model catalog; use a current Codex CLI")
+        if catalog_result.returncode:
+            raise TransportError("CLI model catalog command failed")
+        return models
 
     def argv(self, role, cwd, schema, instructions):
         model, effort = self.models[role]

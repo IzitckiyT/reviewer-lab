@@ -19,7 +19,7 @@ from .oracle import evaluate
 from .manual import check_source, load_series, validate_source
 from .report import summarize
 from .evidence import build_evidence
-from .providers import catalog, create_transport, models_for, setup_status
+from .providers import catalog, checked_status, create_transport, models_for, setup_status
 from .transport import TransportError, redact
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,160}\Z")
@@ -111,17 +111,51 @@ class Dashboard:
         self.read_only = read_only
         self.selected_provider = provider
         self.live_available = True
+        self.provider_checks = {}
+        self.provider_check_lock = threading.Lock()
 
     def providers(self):
         result = []
         for entry in catalog():
             status = setup_status(entry["id"])
+            cached = self.provider_checks.get(entry["id"])
+            if cached and cached["available"] == status["available"]:
+                status = cached
             models = models_for(entry["id"])
             result.append({**entry, **status, "id": entry["id"],
                            "default_models": {role: value[0] for role, value in models.items()},
                            "transport": entry.get("kind", entry["id"])})
         return {"providers": result, "selected_provider": self.selected_provider,
                 "live_available": self.live_available}
+
+    def check_provider(self, config):
+        """Explicit connection check; never called by normal dashboard polling."""
+        if not self.live_available:
+            raise PermissionError("Проверка подключения доступна при локальном запуске проекта.")
+        if not isinstance(config, dict) or set(config) != {"provider"}:
+            raise ValueError("Выберите провайдера")
+        provider = config["provider"]
+        models_for(provider)
+        with self.provider_check_lock:
+            try:
+                transport = create_transport(self.root, provider=provider)
+                readiness = transport.doctor(check_models=False) if provider == "codex" else transport.doctor()
+                status = checked_status(provider, readiness=readiness)
+                if provider == "codex":
+                    try:
+                        models = [model["slug"] for model in transport.model_catalog()
+                                  if model.get("visibility", "list") == "list" and
+                                  isinstance(model.get("slug"), str) and
+                                  re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", model["slug"])]
+                        if models:
+                            status.update(models=list(dict.fromkeys(models)), models_source="codex_cli_catalog",
+                                          models_note="Список прочитан из установленного Codex CLI. Доступ к выбранной модели проверится при запуске.")
+                    except (TransportError, OSError, subprocess.TimeoutExpired):
+                        status["models_note"] = "Вход подтверждён, но список моделей прочитать не удалось. Можно указать ID вручную."
+            except (TransportError, OSError, subprocess.TimeoutExpired) as exc:
+                status = checked_status(provider, error=exc)
+            self.provider_checks[provider] = status
+        return self.providers()
 
     def enable_live(self, config):
         if not self.live_available:
@@ -138,7 +172,14 @@ class Dashboard:
             transport = create_transport(self.root, provider=provider)
             readiness = transport.doctor(check_models=False) if provider == "codex" else transport.doctor()
         except (TransportError, OSError, subprocess.TimeoutExpired) as exc:
+            self.provider_checks[provider] = checked_status(provider, error=exc)
             raise RuntimeError(redact(str(exc))) from exc
+        status = checked_status(provider, readiness=readiness)
+        previous = self.provider_checks.get(provider, {})
+        for key in ("models", "models_note", "models_source"):
+            if key in previous:
+                status[key] = previous[key]
+        self.provider_checks[provider] = status
         with self.lock:
             if self.process and self.process.poll() is None:
                 raise RuntimeError("Дождитесь завершения текущего эксперимента")
@@ -409,6 +450,9 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                           "/case-copy.js": ("case-copy.js", "text/javascript; charset=utf-8"),
                           "/test-explanation.js": ("test-explanation.js", "text/javascript; charset=utf-8"),
+                          "/provider-setup.js": ("provider-setup.js", "text/javascript; charset=utf-8"),
+                          "/run-story.js": ("run-story.js", "text/javascript; charset=utf-8"),
+                          "/run-story.css": ("run-story.css", "text/css; charset=utf-8"),
                           "/style.css": ("style.css", "text/css; charset=utf-8"),
                           "/fonts.css": ("fonts.css", "text/css; charset=utf-8"),
                           "/workspace.css": ("workspace.css", "text/css; charset=utf-8")}
@@ -460,6 +504,8 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                 config = json.loads(self.rfile.read(length))
                 if self.path == "/api/enable-live":
                     return self.send(200, app.enable_live(config))
+                if self.path == "/api/providers/check":
+                    return self.send(200, app.check_provider(config))
                 if self.path == "/api/start":
                     return self.send(201, app.launch(config))
                 if self.path == "/api/manual":

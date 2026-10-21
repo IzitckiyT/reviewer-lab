@@ -47,7 +47,7 @@ function harness({respond, allowPost = false} = {}) {
       return {ok: true, json: async () => value};
     },
   });
-  for (const file of ['case-copy.js', 'test-explanation.js']) {
+  for (const file of ['case-copy.js', 'test-explanation.js', 'provider-setup.js', 'run-story.js']) {
     const helper = path.join(__dirname, '..', 'ui', file);
     if (fs.existsSync(helper)) vm.runInContext(fs.readFileSync(helper, 'utf8'), context, {filename: 'ui/' + file});
   }
@@ -1526,13 +1526,37 @@ test('resuming a manual series uses its pinned provider and never sends replacem
   assert.deepEqual(posts,[['/api/enable-live',{provider:'deepseek'}],['/api/manual',{case:'owner',source:'NEXT_PATCH',run_id:saved.id}]]);
 });
 
-test('refreshing readiness is a GET request and never activates live mode',async()=>{
-  const h=harness({respond:path=>{assert.equal(path,'/api/providers');return {providers:providerFixtures,live_available:true};}});
-  launchFields(h);
-  h.run('state.data.read_only=true;state.view="launch";renderLaunch()');
+test('checking a selected CLI is an explicit POST without enabling live mode or changing the chosen reviewer',async()=>{
+  let posted;
+  const h=harness({allowPost:true,respond:(path,opts)=>{
+    assert.equal(path,'/api/providers/check');assert.equal(opts.method,'POST');posted=JSON.parse(opts.body);
+    return {providers:providerFixtures.map(p=>p.id==='claude'?{...p,connection:{status:'ready',installed:true,authenticated:true,version:'2.2.1',auth_source:'Claude account'}}:p),live_available:true};
+  }});
+  const fields=launchFields(h,{reviewer_model:'opus'});
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="opus";state.data.read_only=true;state.view="launch";renderLaunch()',{fixtures:providerFixtures});
   await h.click({action:'refresh-providers'});
-  assert.deepEqual(h.requests,['/api/providers']);
+  assert.deepEqual(h.requests,['/api/providers/check']);
+  assert.deepEqual(posted,{provider:'claude'});
   assert.equal(h.run('state.data.read_only'),true);
+  assert.equal(h.run('state.reviewerModels.claude'),'opus');
+  assert.equal(fields.reviewer_model.value,'opus');
+  assert.match(h.node('#launch-provider-status').innerHTML,/Вход в Claude Code подтверждён/);
+});
+
+test('a refreshed CLI catalog preserves a reviewer that is absent from the catalog as a custom model',async()=>{
+  const fixtures=providerFixtures.map(p=>p.id==='codex'?{...p,models:['new-catalog-model']}:p);
+  const h=harness({allowPost:true,respond:(path,opts)=>{
+    assert.equal(path,'/api/providers/check');assert.equal(opts.method,'POST');
+    return {providers:fixtures,live_available:true};
+  }});
+  const fields=launchFields(h,{reviewer_model:'__custom__',reviewer_model_custom:'retained-reviewer'});
+  h.run('state.data.providers=fixtures;state.providerId="codex";state.reviewerModels.codex="retained-reviewer";state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  await h.click({action:'refresh-providers'});
+  assert.equal(h.run('state.reviewerModels.codex'),'retained-reviewer');
+  assert.equal(fields.reviewer_model.value,'__custom__');
+  assert.equal(fields.reviewer_model_custom.value,'retained-reviewer');
+  assert.match(h.node('#launch-model-picker').innerHTML,/new-catalog-model/);
+  assert.match(h.node('#launch-model-picker').innerHTML,/value="retained-reviewer"/);
 });
 
 test('new case metadata supplies its rule, target and example without a hardcoded case registry',async()=>{
@@ -1626,12 +1650,65 @@ test('a manual reviewer selector exposes the chosen model in its collapsed summa
   const h=harness();
   h.run('state.data.providers=fixtures;state.providerId="claude";state.view="manual";renderManual()',{fixtures:providerFixtures});
   const html=h.node('#main').innerHTML;
-  assert.match(closedDisclosure(html,'Ревьюер · sonnet'),/<select id="manual-reviewer-model"/);
+  closedDisclosure(html,'Ревьюер · sonnet');
+  assert.match(html,/<select id="manual-reviewer-model"/);
   h.node('#manual-reviewer-model').value='haiku';
   await h.emit('change',{target:{id:'manual-reviewer-model',value:'haiku'}});
   assert.equal(h.node('#manual-model-summary').textContent,'Ревьюер · haiku');
   assert.equal(h.run('chosenReviewer("manual")'),'haiku');
   assert.deepEqual(h.requests,[]);
+});
+
+test('one MonitoringBench screening opens a readable result with the chosen attempt instead of the experiment toolbar',()=>{
+  const h=harness(),caseId='mb_secret_diagnostics';
+  const row=attempt({id:'selected-paper-patch',case:caseId,source:'SAVED_CODE',oracle:{status:'evaluated',target_regression:true,correct:false,
+    rows:[{input:['185.199.108.153',true,'connectivity-test'],expected:false,actual:true}],
+    witnesses:[{input:['185.199.108.153',true,'connectivity-test'],expected:false,actual:true}]}});
+  const data=prepareRun(h,[row],{experiment_kind:'candidate_screen',cases:[caseId],attempts_per_run:1,repeats:1,modes:['independent']});
+  data.cases=[{id:caseId,title:'Paper case'}];
+  h.run('state.details.set(data.id,data);renderRuns()',{data});
+  const html=h.node('#main').innerHTML;
+  assert.match(html,/single-run-story/);
+  assert.match(html,/Секрет под видом диагностики/);
+  assert.match(html,/Модель пропустила ошибку/);
+  assert.match(html,/Код нарушает правило/);
+  assert.match(html,/Отправка запрещена/);
+  assert.match(html,/Отправка разрешена/);
+  assert.match(html,/Ответ модели/);
+  assert.match(html,/Два проверочных примера/);
+  assert.doesNotMatch(html,/attempt-toolbar|id="attempt-search"|id="attempt-sort"|\bTrue\b|\bFalse\b/);
+  assert.equal(h.run('state.attempt'),row.id);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('a live answer arriving in a simple run preserves the code inspection already open',async()=>{
+  const caseId='mb_secret_diagnostics',row=attempt({id:'paper-current',case:caseId,source:'SAVED_CODE',outcome:'running',reviewer:{verdict:'NOT_CALLED'},success:false});
+  const manifest={experiment_kind:'candidate_screen',status:'running',cases:[caseId],attempts_per_run:1,repeats:1,modes:['independent'],models:{reviewer:['gpt-test','medium']}};
+  const completed={id:detail.id,manifest:{...manifest,status:'completed'},rows:[{...row,outcome:'reviewed',reviewer:{verdict:'BLOCK',reason:'Stopped the leak.'}}],calls:[],cases:[{id:caseId,title:'Paper case'}]};
+  const h=harness({respond:path=>{
+    if(path==='/api/state')return {runs:[],cases:completed.cases,active:{id:completed.id,running:false}};
+    assert.equal(path,'/api/runs/'+completed.id);return completed;
+  }});
+  const data=prepareRun(h,[row],manifest);
+  h.run('state.view="runs";state.data.active={id:data.id,running:true};renderRuns()',{data});
+  const story=h.node('#run-story-body');
+  const disclosure=(label,open=false)=>({open,querySelector:()=>({textContent:label})});
+  let details=[disclosure('Код выбранного патча',true),disclosure('Два проверочных примера')];
+  let codes=[{textContent:'SAVED_CODE',scrollTop:37,scrollLeft:18}];
+  let markup=h.run('LabRunStory.render(data)',{data});
+  Object.defineProperty(story,'innerHTML',{configurable:true,get:()=>markup,set:value=>{
+    markup=value;
+    details=[disclosure('Ответ модели'),disclosure('Код выбранного патча'),disclosure('Два проверочных примера')];
+    codes=[{textContent:'SAVED_CODE',scrollTop:0,scrollLeft:0}];
+  }});
+  story.querySelectorAll=selector=>selector==='details[open]'?details.filter(item=>item.open):selector==='details'?details:selector==='pre'?codes:[];
+  await h.run('pollOnce()');
+  assert.match(story.innerHTML,/Модель отклонила патч/);
+  assert.equal(details.find(item=>item.querySelector().textContent==='Код выбранного патча').open,true);
+  assert.equal(details.find(item=>item.querySelector().textContent==='Ответ модели').open,false);
+  assert.deepEqual([codes[0].scrollTop,codes[0].scrollLeft],[37,18]);
+  assert.equal(h.run('state.attempt'),row.id);
+  assert.deepEqual(h.requests,['/api/state','/api/runs/'+completed.id]);
 });
 
 test('blank manual custom model disables only model submission and explains the missing ID',async()=>{

@@ -17,7 +17,7 @@ from lab.engine import run_campaign
 from lab.oracle import evaluate, validate_cases
 from lab.report import build_report
 from lab.transport import CodexTransport, TransportError
-from lab.providers import catalog, create_transport, models_for
+from lab.providers import catalog, create_transport, models_for, setup_status
 from lab.verify import verify_run
 
 ROOT = Path(__file__).resolve().parent
@@ -29,7 +29,7 @@ def main(argv=None):
         argv = ["start"]
     parser = argparse.ArgumentParser(description="Reviewer Lab: проверка AI-ревьюера. Без аргументов — демо без моделей.")
     commands = parser.add_subparsers(dest="command", required=True)
-    start = commands.add_parser("start", help="Открыть демо без моделей; --live включает новые обращения к Codex")
+    start = commands.add_parser("start", help="Открыть быстрый старт; --live разрешает запуск с выбранным подключением")
     start.add_argument("--live", action="store_true", help="Явно разрешить новые обращения к моделям и расход квоты")
     start.add_argument("--port", type=int, default=None, help="Порт; по умолчанию 8765 или свободный, если 8765 занят")
     start.add_argument("--no-open", action="store_true", help="Напечатать адрес без открытия браузера")
@@ -37,7 +37,7 @@ def main(argv=None):
     commands.add_parser("check", help="Offline validation of all custom case fixtures")
     doctor = commands.add_parser("doctor", help="Проверить подключение провайдера без обращения к модели")
     doctor.add_argument("--provider", choices=("codex", "claude", "deepseek"), default="codex")
-    commands.add_parser("providers", help="Показать поддерживаемые провайдеры и настройку")
+    commands.add_parser("providers", help="Показать найденные CLI/API и команды подключения без обращения к моделям")
     commands.add_parser("cases", help="List custom cases")
     ui = commands.add_parser("ui", help="Local dashboard and presentation replay; no model calls on opening")
     ui.add_argument("--port", type=int, default=None, help="Listen port (REVIEWER_LAB_PORT, default 8765)")
@@ -46,7 +46,7 @@ def main(argv=None):
     ui.add_argument("--public-origin", action="append", default=None,
                     help="Exact browser origin, repeat for aliases; overrides REVIEWER_LAB_PUBLIC_ORIGINS")
     ui.add_argument("--open", action="store_true", help="Open the dashboard in your browser")
-    run = commands.add_parser("run", help="LIVE run: consumes ChatGPT/Codex quota")
+    run = commands.add_parser("run", help="Запустить эксперимент: использует квоту выбранного CLI или платный API")
     run.add_argument("--cases", nargs="+", choices=[*CASES, "all"], default=["owner"])
     run.add_argument("--modes", nargs="+", choices=["independent", "feedback"],
                      default=["feedback"])
@@ -114,7 +114,8 @@ def main(argv=None):
         elif args.command == "doctor":
             print(json.dumps(create_transport(ROOT, provider=args.provider).doctor(), indent=2, ensure_ascii=False))
         elif args.command == "providers":
-            print(json.dumps(catalog(), indent=2, ensure_ascii=False))
+            print(json.dumps([{**entry, **setup_status(entry["id"])} for entry in catalog()],
+                             indent=2, ensure_ascii=False))
         elif args.command == "report":
             print(json.dumps(build_report(args.run_dir), indent=2, ensure_ascii=False))
         elif args.command == "verify":
