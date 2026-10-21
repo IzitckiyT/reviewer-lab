@@ -276,6 +276,18 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/workspace.css')[0], 200)
         self.assertEqual(self.request('/fonts/../../README.md')[0], 404)
 
+    def test_case_explanations_are_loaded_and_served_without_external_scripts(self):
+        code, _, body = self.request('/')
+        self.assertEqual(code, 200)
+        self.assertLess(body.index(b'src="/case-copy.js"'), body.index(b'src="/test-explanation.js"'))
+        self.assertLess(body.index(b'src="/test-explanation.js"'), body.index(b'src="/app.js"'))
+        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView')]:
+            code, headers, body = self.request('/' + name)
+            self.assertEqual(code, 200)
+            self.assertEqual(headers['Content-Type'], 'text/javascript; charset=utf-8')
+            self.assertIn(marker, body)
+        self.assertEqual(self.request('/../case-copy.js')[0], 404)
+
     def test_cross_origin_and_missing_token_cannot_start_run(self):
         payload=dict(preset='feedback',case='owner',effort='medium',attempts=2,repeats=1)
         with patch.object(self.server.dashboard,'launch') as launch:

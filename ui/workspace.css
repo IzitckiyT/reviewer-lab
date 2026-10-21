@@ -559,7 +559,7 @@ dialog::backdrop {background:#292a2d40}
  .experiment-detail .attempt-toolbar {grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
  .experiment-detail .attempt-toolbar input {grid-column:1/-1}
  .experiment-detail .attempt-detail-layout {grid-template-columns:minmax(0,1fr)}
- .experiment-detail .attempt-detail-layout .decision-panel {padding:20px 0 0;border-left:0;border-top:1px solid #e6e7e9}
+ .experiment-detail .attempt-detail-layout .decision-panel {order:-1;padding:0 0 20px;border-left:0;border-top:0;border-bottom:1px solid #e6e7e9}
  .experiment-detail .attempt-detail-layout .result-pair {max-width:400px}
 }
 @media(max-width:680px) {
@@ -917,3 +917,88 @@ dialog::backdrop {background:#292a2d40}
  .launch-page .launch-model-row {grid-template-columns:minmax(0,1fr);gap:18px}
 }
 @media(max-width:760px) {.quick-start {margin-top:30px}.quick-start-steps {font-size:14px}}
+
+/* One visible scenario; the complete case library opens on demand. */
+.case-choice {padding:19px 20px;border:1px solid #dce3ec;border-radius:7px;background:#fff}
+.case-choice-heading {display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:15px}
+.case-choice-label {color:#8994a3;font-size:11px;line-height:1.5}
+.case-choice-button {display:inline-flex;align-items:center;gap:12px;padding:6px 9px;margin:-6px -9px -6px 0;border:0;border-radius:4px;background:transparent;color:#1478e1;font:500 12px/1.5 var(--sans);cursor:pointer;white-space:nowrap}
+.case-choice-button:hover {background:#f1f6fc}
+.case-choice-button:disabled {color:#a0a8b4;cursor:default;background:transparent}
+.case-choice-button>span {font-size:15px;font-weight:400}
+.case-choice>strong {display:block;color:#344153;font:500 19px/1.35 var(--sans);letter-spacing:-.25px}
+.case-choice .case-choice-rule {max-width:570px;margin:9px 0 0;color:#778291;font:13px/1.65 var(--sans)}
+.case-choice-locked {display:block;margin-top:13px;color:#9aa3af;font-size:11px;line-height:1.6}
+.case-choice select[hidden] {display:none}
+.launch-settings>#case-provenance:has(.case-provenance) {margin:-19px 0 25px}
+.manual-rule .case-choice {padding:0;border:0}
+.manual-rule .case-choice .case-choice-rule {margin-bottom:0}
+#case-dialog {width:min(690px,calc(100vw - 36px));max-height:min(850px,calc(100dvh - 48px));padding:28px 30px 20px;border:1px solid #e2e7ef;border-radius:12px;background:#fff;box-shadow:0 24px 90px #1b2c4b24;color:#344153}
+#case-dialog::backdrop {background:#1d2e4552;backdrop-filter:blur(3px)}
+.case-dialog-top {display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:24px}
+.case-dialog-top h2 {margin:0;font:500 25px/1.25 var(--sans);letter-spacing:-.6px;color:#344153}
+.case-dialog-top p {margin:10px 0 0;color:#8a94a2;font-size:13px;line-height:1.6}
+.case-dialog-top .icon-button {flex:none;margin-top:-5px;margin-right:-8px}
+.case-option-group+.case-option-group {margin-top:18px}
+.case-option-group>h3 {display:flex;align-items:center;gap:9px;margin:0 0 10px;color:#8b96a5;font:500 11px/1.5 var(--sans);letter-spacing:.1px}
+.case-option-group>h3>span {padding:1px 5px;border-radius:3px;background:#f3f5f8;color:#a0a9b5;font:10px/1.5 var(--mono)}
+.case-options {display:grid;gap:7px}
+.case-option {display:flex;align-items:center;gap:14px;width:100%;padding:10px 15px;border:1px solid #e8ebf0;border-radius:6px;background:#fff;text-align:left;cursor:pointer;color:#566171;font-family:var(--sans)}
+.case-option:hover {background:#f8fafc;border-color:#cbd8e9}
+.case-option.selected {background:#f3f7fe;border-color:#a9c6ee}
+.case-option-marker {display:flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;border:1px solid #dce3ec;border-radius:50%;color:#fff;font-size:11px;background:#fff}
+.case-option.selected .case-option-marker {background:#1478e1;border-color:#1478e1}
+.case-option>span:last-child {min-width:0}
+.case-option strong {display:block;color:#455365;font-size:13px;font-weight:500;line-height:1.5}
+.case-option small {display:block;margin-top:4px;color:#8b95a3;font-size:12px;line-height:1.55}
+.case-dialog-note {margin:20px 0 0;padding-top:16px;border-top:1px solid #edf0f4;color:#9ba4b0;font-size:11px;line-height:1.7}
+.case-choice-button:focus-visible,.case-option:focus-visible {outline:2px solid #087dff;outline-offset:3px}
+@media(max-width:560px) {
+ .case-choice {padding:17px}
+ .case-choice-heading {gap:8px;align-items:flex-start}
+ .case-choice-label {font-size:10px}
+ .case-choice-button {font-size:11px;gap:8px}
+ .case-choice>strong {font-size:17px}
+ #case-dialog {width:calc(100vw - 20px);max-height:calc(100dvh - 20px);padding:23px 19px 18px;border-radius:9px}
+ .case-dialog-top {margin-bottom:20px}
+ .case-dialog-top h2 {font-size:23px}
+ .case-option {padding:12px;gap:11px}
+ .case-option small {font-size:11px}
+}
+.case-choice .case-choice-violation {margin:14px 0 0;padding-top:12px;border-top:1px solid #edf0f4;color:#697888;font:12px/1.65 var(--sans)}
+.case-choice .case-choice-violation>span {color:#9aa3af}
+.case-choice .case-choice-violation:empty {display:none}
+.launch-advanced>.form-field:first-of-type {margin-top:18px}
+.manual-rule .case-choice {width:100%}
+
+/* Read decisions as actions; raw Python values stay in closed details. */
+.case-example-label {display:block;color:#8a95a3;font-size:11px}
+.case-example-situation {margin:8px 0 12px;color:#526173;line-height:1.65}
+.case-example-decisions {display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.case-example-decisions small {display:block;margin-bottom:5px;color:#8a95a3;font-size:11px}
+.case-example-decisions strong {display:block;color:#536173;font:500 13px/1.5 var(--sans)}
+.case-example-decisions>div:last-child strong {color:#ae5861}
+.scenario-witness {margin-top:20px;padding-top:16px;border-top:1px solid #e8ecf1}
+.scenario-witness .witness-situation {margin:0;color:#526173;font:400 14px/1.7 var(--sans);overflow-wrap:anywhere}
+.scenario-witness .witness {margin-top:14px;gap:16px}
+.scenario-witness .witness b {display:block;font:500 15px/1.55 var(--sans)}
+.scenario-witness .witness-meaning {margin:13px 0 0;color:#7e8896;font-size:12px;line-height:1.7}
+.technical-values {margin-top:14px;color:#8a94a2;font:12px/1.7 var(--sans)}
+.technical-values summary {cursor:pointer;color:#8190a1}
+.technical-values>code {display:block;margin-top:12px;overflow-wrap:anywhere}
+.technical-values code {font-size:11px}
+.technical-values p {margin:9px 0 0}
+.test-explanation {margin:0;padding:16px 18px;color:#788493;font:13px/1.75 var(--sans)}
+.scenario-table td {font:12px/1.6 var(--sans);white-space:normal;min-width:125px}
+.scenario-table td:first-child {min-width:235px;max-width:360px}
+.scenario-witness.compact {margin-top:12px;padding-top:12px}
+.scenario-witness.compact .witness-situation {font-size:12px}
+.scenario-witness.compact .witness b {font-size:13px}
+.scenario-witness.compact .witness-meaning {display:none}
+.launch-controls-note {margin-top:16px;color:#8a95a3;font-size:12px;line-height:1.65}
+.launch-controls-note>summary {cursor:pointer}
+.launch-controls-note>p {margin:10px 0 0}
+@media(max-width:480px) {
+ .case-example-decisions,.scenario-witness .witness {grid-template-columns:1fr;gap:12px}
+ .scenario-witness .witness b {font-size:14px}
+}

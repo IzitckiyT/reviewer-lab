@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="/fonts.css">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/workspace.css">
+  <script src="/case-copy.js" defer></script>
+  <script src="/test-explanation.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -29,6 +31,7 @@
     <main id="main" tabindex="-1"><div class="loading">Загружаем сохранённые эксперименты…</div></main>
   </div>
   <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="case-dialog" aria-labelledby="case-dialog-title" aria-describedby="case-dialog-description"><div class="case-dialog-top"><div><h2 id="case-dialog-title">Что проверяем?</h2><p id="case-dialog-description">Выберите задачу для ревьюера.</p></div><button class="icon-button" type="button" data-action="close-case-picker" aria-label="Закрыть выбор задачи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div id="case-options"></div><p class="case-dialog-note">Выбор задачи ничего не запускает. Все примеры выполняются в ограниченной локальной среде.</p></dialog>
   <dialog id="trace-dialog" aria-labelledby="trace-title" aria-describedby="trace-description"><div class="dialog-top"><div class="dialog-heading"><h2 id="trace-title"></h2><p class="dialog-subtitle" id="trace-description">Запрос, ответ и события</p></div><button class="icon-button" type="button" id="close-trace" aria-label="Закрыть трассу"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div id="trace-body"></div></dialog>
 </body>
 </html>

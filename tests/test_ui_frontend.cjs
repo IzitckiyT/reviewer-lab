@@ -21,6 +21,7 @@ function harness({respond, allowPost = false} = {}) {
     if (!nodes.has(selector)) nodes.set(selector, {
       textContent: '', innerHTML: '', disabled: false,
       addEventListener() {}, scrollIntoView() {}, focus() { this.focused = true; },
+      showModal() { this.open = true; }, close() { this.open = false; },
       setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
       classList: {add() {}, remove() {}, toggle() {}},
     });
@@ -46,6 +47,10 @@ function harness({respond, allowPost = false} = {}) {
       return {ok: true, json: async () => value};
     },
   });
+  for (const file of ['case-copy.js', 'test-explanation.js']) {
+    const helper = path.join(__dirname, '..', 'ui', file);
+    if (fs.existsSync(helper)) vm.runInContext(fs.readFileSync(helper, 'utf8'), context, {filename: 'ui/' + file});
+  }
   vm.runInContext(rendererSource, context, {filename: 'ui/app.js'});
   const run = (code, values = {}) => {
     Object.assign(context, values);
@@ -156,17 +161,19 @@ test('manual guide reveals a visible Russian counterexample before the reviewer 
   assert.equal(h.run('state.stage'), 2);
   const tested = h.run('guideContent(demo,row,2)');
   const visibleProof = tested.split('<details')[0];
-  assert.match(visibleProof, /editor/);
+  assert.match(visibleProof, /Редактор/);
   assert.match(visibleProof, /Подтверждение[^]*есть/);
-  assert.match(visibleProof, /По правилу[^]*Отказать/);
-  assert.match(visibleProof, /На самом деле[^]*Разрешено/);
-  closedDisclosure(tested, 'Все 1 проверок');
+  assert.match(visibleProof, /По правилу[^]*Публикация запрещена/);
+  assert.match(visibleProof, /Код решил[^]*Публикация разрешена/);
+  assert.doesNotMatch(visibleProof, /\b(?:True|False|PASS|FAIL)\b|decision\(/);
+  assert.match(closedDisclosure(tested, 'Значения в коде'), /False[^]*True/);
+  closedDisclosure(tested, 'Все ситуации · 1');
   assert.doesNotMatch(tested, /SAVED_REVIEWER_REASON/);
   await h.click({action: 'guide-next'});
   assert.equal(h.run('state.stage'), 3);
   const reviewed = h.node('#main').innerHTML;
   assert.match(reviewed, /Изменение одобрено/);
-  assert.match(reviewed, /Тест нашёл нарушение/);
+  assert.match(reviewed, /Код нарушает правило[^]*модель разрешила принять/);
   assert.match(closedDisclosure(reviewed, 'Прочитать ответ модели'), /SAVED_REVIEWER_REASON/);
   assert.doesNotMatch(reviewed.split('<details')[0], /SAVED_REVIEWER_REASON/);
   await h.click({action: 'guide-next'});
@@ -225,15 +232,15 @@ test('manual guide states safe rejection, missing tests and call errors truthful
     oracle: {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []}});
   const rejected = h.run('guideContent(detail,row,3)', {detail, row: safe});
   assert.match(rejected, /ложная блокировка/);
-  assert.doesNotMatch(rejected, /Тест нашёл нарушение/);
+  assert.doesNotMatch(rejected, /Код нарушает правило|модель разрешила принять|Тест нашёл нарушение/);
   for (const [row, phrase] of [
-    [attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}), /ещё не завершён/],
+    [attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}), /Код ещё не проверен/],
     [attempt({success: false, outcome: 'invalid_candidate', reviewer: {verdict: 'NOT_CALLED'},
-      oracle: {status: 'invalid', correct: false, target_regression: false, rows: [], reason: 'BAD_SOURCE'}}), /Код не прошёл проверку/],
+      oracle: {status: 'invalid', correct: false, target_regression: false, rows: [], reason: 'BAD_SOURCE'}}), /Код не удалось проверить/],
   ]) {
     const content = h.run('guideContent(detail,row,2)', {row});
     assert.match(content, phrase);
-    assert.doesNotMatch(content, /правило соблюдено|Разрешено|Отказано/);
+    assert.doesNotMatch(content, /правило соблюдено|соблюдает правило|Публикация разрешена|Публикация запрещена/);
     assert.doesNotMatch(h.run('guideContent(detail,row,3)'), /Изменение одобрено|Изменение отклонено|Дословный ответ модели/);
   }
   const failed = h.run('guideContent(detail,row,3)', {
@@ -249,11 +256,12 @@ test('missing witness data does not make an incorrect candidate look correct', (
   const row = attempt();
   row.oracle.witnesses = [];
   const content = run('guideContent(detail,row,2)', {detail, row});
-  assert.doesNotMatch(content, /правило соблюдено|Правило соблюдено/);
-  assert.match(content, /отличается|наруш/);
+  assert.doesNotMatch(content, /правило соблюдено|Правило соблюдено|соблюдает правило/);
+  assert.match(content, /Код нарушает правило, но пример ситуации не сохранён/);
   row.oracle.correct = true;
   row.oracle.target_regression = false;
-  assert.match(run('guideContent(detail,row,2)', {row}), /правило соблюдено/);
+  row.oracle.rows = [{input:['editor',true],expected:false,actual:false}];
+  assert.match(run('guideContent(detail,row,2)', {row}).split('<details')[0], /код соблюдает правило/);
 });
 
 test('owner witness explanation describes the displayed input, not an assumed editor', () => {
@@ -262,8 +270,8 @@ test('owner witness explanation describes the displayed input, not an assumed ed
   row.oracle.witnesses[0].input = ['guest', true];
   const content = run('guideContent(detail,row,2)', {detail, row});
   const visibleProof = content.split('<details')[0];
-  assert.match(visibleProof, /guest/);
-  assert.doesNotMatch(visibleProof, /Редактор получил/);
+  assert.match(visibleProof, /Гость/);
+  assert.doesNotMatch(visibleProof, /Редактор|editor|guest|True|False/);
 });
 
 test('the rule step shows original code even when a later inspector tab was selected', () => {
@@ -280,8 +288,8 @@ test('a previously selected proof tab does not reveal tests during the candidate
   const {run} = harness();
   for (const tab of ['tests', 'explain']) {
     const markup = run('inspector(detail,row,tab,1)', {detail, row: attempt(), tab});
-    assert.doesNotMatch(markup, /× Нарушение|Арифметический разбор|class="collision/);
-    assert.match(run('inspector(detail,row,"tests",2)'), /× Нарушение/);
+    assert.doesNotMatch(markup, /class="scenario-table"|class="scenario-witness|Арифметический разбор|class="collision/);
+    assert.match(run('inspector(detail,row,"tests",2)'), /class="scenario-table"[^]*Публикация запрещена[^]*Публикация разрешена[^]*Нарушение/);
   }
 });
 
@@ -292,12 +300,16 @@ test('compact results distinguish safe acceptance, false blocks and detected def
     const safe = attempt({control: 'safe', stage: 'control', success: false, oracle: safeOracle});
     const accepted = run('minimalResult(row,stage)', {row: safe, stage});
     assert.match(heading(accepted), /Безопасный патч принят/);
-    assert.equal((accepted.match(/<strong[^>]*>PASS<\/strong>/g) || []).length, 2);
+    assert.match(accepted, /Правило в коде[^]*<strong[^>]*>Соблюдено<\/strong>/);
+    assert.match(accepted, /Решение модели[^]*<strong>Одобрила код<\/strong>/);
+    assert.doesNotMatch(accepted, /<strong[^>]*>(?:PASS|FAIL|BLOCK)<\/strong>/);
     const falselyBlocked = run('minimalResult(row,stage)', {row: {...safe, reviewer: {verdict: 'BLOCK'}}});
     assert.match(heading(falselyBlocked), /Ложная блокировка/);
     assert.doesNotMatch(heading(falselyBlocked), /Патч отклонён/);
+    assert.match(falselyBlocked, /Правило в коде[^]*Соблюдено[^]*Решение модели[^]*Отклонила код/);
     const blockedDefect = run('minimalResult(row,stage)', {row: attempt({success: false, reviewer: {verdict: 'BLOCK'}})});
     assert.match(heading(blockedDefect), /Патч отклонён/);
+    assert.match(blockedDefect, /Правило в коде[^]*Нарушено[^]*Решение модели[^]*Отклонила код/);
     assert.equal(run('outcome(row)[0]', {row: attempt({success: false, oracle: undefined})}), 'Патч одобрен');
   }
 });
@@ -305,13 +317,13 @@ test('compact results distinguish safe acceptance, false blocks and detected def
 test('missing or invalid oracle data is not presented as a completed test', () => {
   const {run} = harness();
   for (const [row, expected] of [
-    [attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}), /Тест ещё не выполнен/],
+    [attempt({success: false, outcome: 'running', reviewer: {verdict: 'NOT_CALLED'}, oracle: undefined}), /Код ещё не проверен/],
     [attempt({success: false, outcome: 'invalid_candidate', reviewer: {verdict: 'NOT_CALLED'},
-      oracle: {status: 'invalid', target_regression: false, correct: false, reason: 'BAD_SOURCE', rows: []}}), /Код не прошёл проверку/],
+      oracle: {status: 'invalid', target_regression: false, correct: false, reason: 'BAD_SOURCE', rows: []}}), /Код не удалось проверить/],
   ]) {
     const result = run('minimalResult(row,2)', {row});
     assert.match(heading(result), expected);
-    assert.doesNotMatch(result, /<strong[^>]*>(?:PASS|FAIL|BLOCK)<\/strong>|Нарушение подтверждено/);
+    assert.doesNotMatch(result, /<strong[^>]*>(?:PASS|FAIL|BLOCK|Соблюдено|Нарушено)<\/strong>|Нарушение подтверждено|Одобрила код|Отклонила код/);
     assert.equal(run('answerDisclosure(detail,row,2)', {detail}), '');
   }
 });
@@ -326,7 +338,7 @@ test('unavailable reviewer results are distinguished from a hidden playback step
     const row = attempt({outcome, oracle, success: false, reviewer: {verdict}});
     const result = run('minimalResult(row,4)', {row});
     assert.match(heading(result), label);
-    assert.doesNotMatch(result, /<strong[^>]*>(?:PASS|BLOCK|Скрыт)<\/strong>/);
+    assert.doesNotMatch(result, /<strong[^>]*>(?:PASS|BLOCK|Скрыт|Одобрила код|Отклонила код)<\/strong>/);
     const response = run('answerDisclosure(detail,row,4)', {detail});
     closedDisclosure(response, 'Состояние вызова');
     assert.doesNotMatch(response, /Дословный ответ модели/);
@@ -337,11 +349,12 @@ test('exhaustive-domain claims are absent when candidate evaluation stopped earl
   const {run} = harness();
   const row = attempt();
   const completed = run('testTable(row)', {row});
-  assert.match(completed, /Проверены все 1 входов заданного домена/);
+  assert.match(completed, /на 1 заранее заданных ситуациях/);
+  assert.match(completed, /Это все ситуации в выбранной учебной задаче/);
   row.oracle.status = 'invalid';
   row.oracle.reason = 'PARTIAL_CHECK';
   const partial = run('testTable(row)', {row});
-  assert.doesNotMatch(partial, /Проверены все/);
+  assert.doesNotMatch(partial, /Это все ситуации|заранее заданных ситуациях|scenario-table|Публикация запрещена|Публикация разрешена/);
   assert.match(partial, /PARTIAL_CHECK/);
 });
 
@@ -508,7 +521,7 @@ test('attempt details start closed and each action expands only its selected att
   assert.doesNotMatch(h.node('#attempt-records').innerHTML, /SECOND_SOURCE|SECOND_REASON/);
   await h.click({attempt: rows[0].id, openTab: 'tests'});
   assert.equal(h.run('state.attemptOpen'), true, 'Switching tabs should keep the selected attempt expanded');
-  assert.match(h.node('#attempt-records').innerHTML, /× Нарушение/);
+  assert.match(h.node('#attempt-records').innerHTML, /class="scenario-table"[^]*Публикация запрещена[^]*Публикация разрешена[^]*Нарушение/);
   await h.click({attempt: rows[1].id, openTab: 'reviewer'});
   assert.equal(h.run('state.attempt'), 'second');
   const answer = h.node('#attempt-records').innerHTML;
@@ -753,7 +766,7 @@ test('launch preview uses the actual saved patch or the selected original code w
   assert.match(h.node('#launch-source-code').innerHTML, /AUDIT_ORIGINAL/);
   assert.doesNotMatch(h.node('#launch-source-code').innerHTML, /SAVED_PATCH|ORIGINAL_ONLY/);
   assert.match(h.node('#launch-model-summary').textContent, /gpt-5.6-luna/);
-  assert.match(h.node('#launch-plan').innerHTML, /Новые кандидаты/);
+  assert.match(h.node('#launch-plan').innerHTML, /Генератор предложит код с ошибкой[^]*модель принять код или отклонить/);
   assert.match(h.node('#budget-note').textContent, /до 6 генераций/);
   assert.deepEqual(h.requests, [], 'Choosing a preset, rule, or effort must only update the preview');
 });
@@ -960,8 +973,8 @@ test('manual findings separate invalid code, a fixed defect, another regression 
       oracle: {status: 'evaluated', correct: true, target_regression: false, rows: [], witnesses: []}}), /исправ|соблюд|нарушени.*нет|безопас/i, /не отправ|не выз|не нужен|не требуется|ревью/i],
     [manualAttempt({success: false, outcome: 'different_regression', reviewer: {verdict: 'NOT_CALLED'},
       oracle: {status: 'evaluated', correct: false, target_regression: false, rows: [], witnesses: []}}), /друг|дополн|целев|поведени/i, /не отправ|не выз|ревью/i],
-    [manualAttempt(), /пропущ|пропуст|обход/i, /PASS/],
-    [manualAttempt({success: false, reviewer: {verdict: 'BLOCK', reason: 'caught'}}), /замет|обнаруж|отклон|наш/i, /BLOCK/],
+    [manualAttempt(), /пропущ|пропуст|обход/i, /Одобрила код/],
+    [manualAttempt({success: false, reviewer: {verdict: 'BLOCK', reason: 'caught'}}), /замет|обнаруж|отклон|наш/i, /Отклонила код/],
   ];
   const titles = [];
   for (const [row, title, content] of cases) {
@@ -982,7 +995,7 @@ test('pending or failed manual checks never invent a reviewer decision', () => {
   ]) {
     const finding = h.run('manualFinding(row)', {row});
     assert.doesNotMatch(finding.title, /пропущ|пропуст|обход|отклон|модель замет/i);
-    assert.doesNotMatch(finding.reviewer, /\bPASS\b|\bBLOCK\b/);
+    assert.doesNotMatch(finding.reviewer, /\bPASS\b|\bBLOCK\b|Одобрила код|Отклонила код/);
     assert.match(JSON.stringify(finding), /ожида|провер|выполня|ошиб|получ|работ/i);
   }
 });
@@ -1281,7 +1294,7 @@ test('failed reviewer call has no verdict and exposes its diagnostic trace', () 
   const html=h.run('manualResultMarkup(data,row)',{data,row});
   assert.match(html,/Ответ ревьюера не получен/);
   assert.match(html,/data-trace="003-reviewer"/);
-  assert.doesNotMatch(html,/Не вызывался|Одобрил · PASS|Отклонил · BLOCK/);
+  assert.doesNotMatch(html,/Не вызывался|Одобрила код|Отклонила код|Одобрил · PASS|Отклонил · BLOCK/);
 });
 
 test('demo manual check uses only the offline endpoint and invents no reviewer answer', async () => {
@@ -1298,9 +1311,10 @@ test('demo manual check uses only the offline endpoint and invents no reviewer a
   assert.equal(h.run('state.manual.runId'),null);
   assert.equal(h.run('state.manual.preview.reviewer.verdict'),'NOT_CALLED');
   assert.equal(h.run('state.data.active.running'),false);
-  assert.match(h.node('#manual-result').innerHTML,/Локальный тест/);
+  assert.match(h.node('#manual-result').innerHTML,/Поведение кода/);
+  assert.match(h.node('#manual-result').innerHTML,/Решение модели[^]*Не вызывался/);
   assert.match(h.node('#manual-result').innerHTML,/Проверить с моделью/);
-  assert.doesNotMatch(h.node('#manual-result').innerHTML,/Попытка undefined|Одобрил|Нарушение пропущено/);
+  assert.doesNotMatch(h.node('#manual-result').innerHTML,/Попытка undefined|Одобрила код|Отклонила код|Нарушение пропущено/);
 });
 
 test('demo rule switching clears the previous local result while preserving drafts', async () => {
@@ -1344,11 +1358,11 @@ test('demo manual and direct launch expose a real model action and keep setup co
   assert.doesNotMatch(html,/data-view="launch"/);
   assert.match(closedDisclosure(html,'Ревьюер · gpt-5.6-luna'),/id="manual-provider"/);
   assert.match(html,/Проверить с моделью/);
-  assert.match(html,/Только локальный тест/);
+  assert.match(html,/Проверить поведение · без модели/);
   h.run('renderLaunch()');html=h.node('#main').innerHTML;
   assert.match(html,/id="launch-form"|id="start-button"/);
   assert.equal(h.node('#start-button').disabled,false);
-  closedDisclosure(html,'Модели, повторения и лимиты');
+  closedDisclosure(html,'Режим и дополнительные настройки');
   assert.match(html,/квота или баланс/);
   assert.equal((html.match(/id="start-button"/g)||[]).length,1);
   assert.deepEqual(h.requests,[]);
@@ -1393,7 +1407,7 @@ test('local preview progress never implies a model call or exposes the live stop
   const h=harness();
   h.run('state.data.read_only=true;state.manual.pending=true;state.manual.localPending=true');
   const html=h.run('manualResultMarkup(null,null)');
-  assert.match(html,/локально, без модели/);
+  assert.match(html,/что разрешает код[^]*Модель не вызывается/);
   assert.doesNotMatch(html,/Luna|data-action="stop"/);
 });
 
@@ -1552,7 +1566,7 @@ test('ready-patch launch keeps a selected imported case and previews its control
   assert.equal(h.node('#case-field').hidden,false);
   assert.match(h.node('#launch-source-code').innerHTML,/SEED_POLICY/);
   assert.doesNotMatch(h.node('#launch-source-code').innerHTML,/SAVED_OWNER|ORIGINAL_POLICY/);
-  assert.equal(h.node('#launch-source-label').textContent,'Готовый пример нарушения');
+  assert.equal(h.node('#launch-source-label').textContent,'Посмотреть код с ошибкой');
   assert.match(h.node('#rule-note').textContent,/Не разрешать незнакомые запросы/);
   assert.match(h.node('#case-provenance').innerHTML,/MonitoringBench · policy/);
   assert.equal(h.node('#call-budget').textContent,3);
@@ -1657,8 +1671,9 @@ test('live observation reports measured usage and reaches a finished verdict wit
   assert.doesNotMatch(panel,/\d+\s*%|токенов в секунду/);
   completed=true;await h.run('pollOnce()');panel=h.node('#active-slot').innerHTML;
   assert.match(panel,/Эксперимент завершён/);
-  assert.match(panel,/PASS/);
-  assert.match(panel,/editor[^]*ожидалось False/);
+  assert.match(panel,/Модель пропустила ошибку/);
+  assert.match(panel,/Редактор[^]*По правилу[^]*Публикация запрещена[^]*Код решил[^]*Публикация разрешена/);
+  assert.doesNotMatch(panel,/True|False|decision\(/);
   assert.match(panel,/1:05/);
   assert.doesNotMatch(panel,/status-dot|data-action="stop"|Проверяем|Ожидание/);
   assert.match(h.node('#run-meta-status').innerHTML,/Завершён/);
@@ -1674,4 +1689,93 @@ test('an unobserved run never appears completed and missing usage is not estimat
   assert.doesNotMatch(panel,/Эксперимент завершён|data-action="stop"|status-dot/);
   assert.equal(h.run('elapsedLabel("2026-10-21T09:00:00Z","2026-10-21T09:01:05Z")'),'1:05');
   assert.equal(h.run('elapsedLabel(null)'),'—');
+});
+
+const chooserCases = [
+  ['owner','Владельцы'],['audit','Аудит'],['snapshot','Версии'],
+  ['mb_firewall_whitelist','Список адресов'],['mb_firewall_policy','Политика сети'],
+  ['mb_sudo_bootstrap','Права сервиса'],['mb_secret_diagnostics','Отправка секрета'],['mb_malware_chain','Запуск файла'],
+].map(([id,title])=>({id,title,original:'ORIGINAL_'+id,seed:'SEED_'+id,short_rule:'Правило '+id}));
+
+test('the visible task chooser is first and keeps the eight-case library off the main screen',()=>{
+  const h=harness();launchFields(h);
+  h.run('state.data.cases=chooserCases;renderLaunch()',{chooserCases});
+  const page=h.node('#main').innerHTML;
+  assert.match(page,/Выбрать задачу · 8/);
+  assert.match(page,/id="launch-case-button"[^]*?aria-haspopup="dialog"/);
+  assert.match(page,/<select id="case" name="case"[^>]*hidden/);
+  assert.ok(page.indexOf('id="case-field"')<page.indexOf('id="launch-provider"'));
+  assert.doesNotMatch(page,/data-case-option=/);
+  const advanced=closedDisclosure(page,'Режим и дополнительные настройки');
+  assert.match(advanced,/<label for="preset">Режим проверки<\/label>/);
+  assert.equal((page.match(/id="start-button"/g)||[]).length,1);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('opening and selecting one of eight tasks preserves the provider and reviewer without inference',async()=>{
+  const h=harness();const fields=launchFields(h,{provider:'claude',reviewer_model:'opus',attacker_model:'sonnet',repeats:'1'});
+  h.run('state.data.cases=chooserCases;state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="opus";state.view="launch";renderLaunch()',{chooserCases,fixtures:providerFixtures});
+  await h.click({action:'choose-case',caseContext:'launch'});
+  assert.equal(h.node('#case-dialog').open,true);
+  assert.equal(h.run('state.casePicker'),'launch');
+  const options=h.node('#case-options').innerHTML;
+  assert.equal((options.match(/data-case-option=/g)||[]).length,8);
+  assert.match(options,/Базовые задачи/);
+  assert.match(options,/MonitoringBench · адаптации/);
+  assert.match(options,/data-case-option="owner" aria-pressed="true"/);
+  assert.doesNotMatch(options,/\b(?:True|False|PASS|BLOCK|oracle)\b/);
+  await h.click({caseOption:'mb_secret_diagnostics'});
+  assert.equal(fields.case.value,'mb_secret_diagnostics');
+  assert.equal(h.run('state.launchCase'),'mb_secret_diagnostics');
+  assert.equal(h.run('state.providerId'),'claude');
+  assert.equal(fields.reviewer_model.value,'opus');
+  assert.match(h.node('#launch-source-code').innerHTML,/SEED_mb_secret_diagnostics/);
+  assert.equal(h.node('#case-dialog').open,false);
+  assert.equal(h.node('#launch-case-button').focused,true);
+  h.run('renderLaunch()');
+  assert.match(h.node('#main').innerHTML,/<option value="mb_secret_diagnostics" selected>/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('manual task chooser keeps separate drafts and refuses a change in a pinned series',async()=>{
+  const h=harness();
+  h.run('state.data.cases=chooserCases;state.view="manual";renderManual();state.manual.source="OWNER_DRAFT"',{chooserCases});
+  await h.click({action:'choose-case',caseContext:'manual'});
+  assert.equal(h.node('#case-dialog').open,true);
+  await h.click({caseOption:'mb_firewall_policy'});
+  assert.equal(h.run('state.manual.caseId'),'mb_firewall_policy');
+  assert.equal(h.run('state.manual.source'),'ORIGINAL_mb_firewall_policy');
+  h.run('state.manual.source="POLICY_DRAFT"');
+  await h.click({action:'choose-case',caseContext:'manual'});
+  await h.click({caseOption:'owner'});
+  assert.equal(h.run('state.manual.source'),'OWNER_DRAFT');
+  h.run('state.manual.runId="pinned-series"');
+  await h.click({action:'choose-case',caseContext:'manual'});
+  assert.equal(h.node('#case-dialog').open,false);
+  h.run('selectCase("manual","mb_sudo_bootstrap")');
+  assert.equal(h.run('state.manual.caseId'),'owner');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('all eight result renderings name the forbidden action separately from the model decision',()=>{
+  const h=harness();
+  for(const {id} of chooserCases) {
+    const copy=h.run('LabCaseCopy.get(caseId)',{caseId:id});
+    const row=attempt({case:id,oracle:{status:'evaluated',target_regression:true,correct:false,rows:[copy.example],witnesses:[copy.example]}});
+    const markup=h.run('minimalResult(row,4)',{row});
+    const visible=markup.split('<details')[0];
+    const situation=h.run('LabCaseCopy.scenarioText(row.case,row.oracle.witnesses[0].input)');
+    const expected=h.run('LabCaseCopy.decisionText(row.case,false)');
+    const actual=h.run('LabCaseCopy.decisionText(row.case,true)');
+    assert.ok(visible.includes(situation),id+' must show its actual situation');
+    assert.ok(visible.includes(expected),id+' must name the forbidden action');
+    assert.ok(visible.includes(actual),id+' must name the action permitted by the code');
+    assert.match(visible,/Правило в коде[^]*Нарушено[^]*Решение модели[^]*Одобрила код/);
+    assert.doesNotMatch(visible,/\b(?:True|False|PASS|FAIL|BLOCK)\b|decision\(/);
+    assert.match(closedDisclosure(markup,'Значения в коде'),/Ожидалось:[^]*False[^]*Получено:[^]*True/);
+    const manual=h.run('manualResultMarkup(detail,row)',{detail,row});
+    assert.match(manual.split('<details')[0],/Правило в коде[^]*Правило нарушено[^]*Решение модели[^]*Одобрила код/);
+    assert.doesNotMatch(manual.split('<details')[0],/\b(?:True|False|PASS|FAIL|BLOCK)\b|decision\(/);
+  }
+  assert.deepEqual(h.requests,[]);
 });

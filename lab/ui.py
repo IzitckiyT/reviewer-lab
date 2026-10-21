@@ -407,6 +407,8 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
             try:
                 assets = {"/": ("index.html", "text/html; charset=utf-8"),
                           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                          "/case-copy.js": ("case-copy.js", "text/javascript; charset=utf-8"),
+                          "/test-explanation.js": ("test-explanation.js", "text/javascript; charset=utf-8"),
                           "/style.css": ("style.css", "text/css; charset=utf-8"),
                           "/fonts.css": ("fonts.css", "text/css; charset=utf-8"),
                           "/workspace.css": ("workspace.css", "text/css; charset=utf-8")}
