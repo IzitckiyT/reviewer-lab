@@ -9,12 +9,73 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from lab.providers import checked_status, setup_status
+from lab.providers import _claude_env, checked_status, setup_status
 from lab.transport import CodexTransport, TransportError
 from lab.ui import Dashboard, make_server
 
 
 class ConnectionStatusTests(unittest.TestCase):
+    def test_claude_keeps_pinned_runtime_and_prompt_history_disabled(self):
+        flags = ('DISABLE_UPDATES', 'DISABLE_AUTOUPDATER',
+                 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_SKIP_PROMPT_HISTORY')
+        with patch.dict('os.environ', {key: '0' for key in flags}, clear=True):
+            env = _claude_env()
+        for key in flags:
+            self.assertEqual(env[key], '1')
+
+    def test_container_setup_uses_commands_in_the_running_service(self):
+        with patch.dict('os.environ', {'REVIEWER_LAB_CONTAINER': '1'}, clear=True), \
+                patch('lab.providers._cli', return_value='/usr/local/bin/fixture-cli'), \
+                patch('lab.providers.subprocess.run') as run, \
+                patch('lab.providers.urllib.request.build_opener') as http:
+            for provider, command in (
+                    ('codex', 'docker compose exec reviewer-lab codex login --device-auth'),
+                    ('claude', 'docker compose exec reviewer-lab claude auth login')):
+                status = setup_status(provider)
+                self.assertEqual(status['execution_environment'], 'container')
+                self.assertEqual(status['login_command'], command)
+                self.assertEqual(status['setup_command'], command)
+                self.assertFalse(status['ready'])
+                self.assertIsNone(status['connection']['authenticated'])
+            api = setup_status('deepseek')
+            self.assertEqual(api['execution_environment'], 'container')
+            self.assertIsNone(api['login_command'])
+            run.assert_not_called()
+            http.assert_not_called()
+
+    def test_container_flag_is_an_exact_opt_in_and_never_a_command(self):
+        with patch('lab.providers._cli', return_value='/cli/codex'):
+            for value in ('', '0', 'true', 'container', '1; unwanted-command'):
+                with patch.dict('os.environ', {'REVIEWER_LAB_CONTAINER': value}, clear=True):
+                    status = setup_status('codex')
+                self.assertEqual(status['execution_environment'], 'local')
+                self.assertEqual(status['login_command'], '/cli/codex login')
+
+    def test_missing_container_cli_explains_rebuilding_the_image(self):
+        with patch.dict('os.environ', {'REVIEWER_LAB_CONTAINER': '1'}, clear=True), \
+                patch('lab.providers._cli', return_value=None):
+            status = setup_status('claude')
+        self.assertFalse(status['available'])
+        self.assertIn('контейнере', status['message'])
+        self.assertIn('Пересоберите образ', status['message'])
+
+    def test_cached_container_connection_keeps_context_without_auth_details(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.dict('os.environ', {'REVIEWER_LAB_CONTAINER': '1'}, clear=True), \
+                patch('lab.providers._cli', return_value='/cli/claude'), \
+                patch('lab.ui.create_transport') as factory:
+            factory.return_value.doctor.return_value = {'cli_version': 'fixture', 'auth_method': 'claude.ai'}
+            app = Dashboard(tmp)
+            app.check_provider({'provider': 'claude'})
+            for _ in range(3):
+                result = app.providers()
+                status = next(p for p in result['providers'] if p['id'] == 'claude')
+                self.assertEqual(status['execution_environment'], 'container')
+                self.assertEqual(status['connection']['status'], 'ready')
+                self.assertEqual(status['login_command'], 'docker compose exec reviewer-lab claude auth login')
+            factory.return_value.doctor.assert_called_once_with()
+            factory.return_value.call.assert_not_called()
+
     def test_presence_is_not_authenticated_readiness(self):
         with patch('lab.providers._cli', return_value='/cli/codex'), \
                 patch('lab.providers.subprocess.run') as run:

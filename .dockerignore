@@ -4,6 +4,13 @@
 .env.*
 !.env.example
 .venv
+.agents
+.codex
+.claude
+.claude.json
+.claude.json.*
+**/auth.json
+**/.credentials.json
 __pycache__
 **/__pycache__
 *.pyc

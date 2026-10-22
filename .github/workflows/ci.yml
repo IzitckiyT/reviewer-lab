@@ -28,52 +28,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose build
-      - run: docker compose run --rm reviewer-lab python run.py check
-      - name: Smoke-test demo over the published port
+      - run: docker compose build reviewer-lab
+      - run: docker compose -f compose.yaml -f tests/compose.ci.yaml run --rm reviewer-lab python run.py check
+      - name: Verify installed official CLI versions and supported flags without inference
+        run: docker compose -f compose.yaml -f tests/compose.ci.yaml run --rm reviewer-lab python tests/docker_smoke.py cli
+      - name: Start live UI with offline CLI mock and no Internet route
         run: |
-          docker compose up -d
-          python3 - <<'PY'
-          import json
-          import time
-          import urllib.error
-          import urllib.request
-
-          origin = 'http://127.0.0.1:8765'
-          for attempt in range(30):
-              try:
-                  with urllib.request.urlopen(origin + '/api/state', timeout=2) as response:
-                      state = json.load(response)
-                  break
-              except (OSError, urllib.error.URLError):
-                  if attempt == 29:
-                      raise
-                  time.sleep(1)
-          assert state['read_only'] is True
-          examples = {case['id']: case.get('example_run') for case in state['cases']}
-          assert set(examples) == {
-              'owner', 'audit', 'snapshot', 'mb_firewall_whitelist',
-              'mb_firewall_policy', 'mb_sudo_bootstrap',
-              'mb_secret_diagnostics', 'mb_malware_chain',
-          }
-          assert all(example and example.get('verified') is True for example in examples.values())
-          history_examples = state['history_examples']
-          assert len(history_examples) == 4
-          assert {example['id'] for example in history_examples} == {
-              'role-collision', 'unstable-verdict', 'attacker-revision', 'external-health-file',
-          }
-          assert all(example.get('verified') is True for example in history_examples)
-          request = urllib.request.Request(origin + '/api/start', data=b'{}', headers={
-              'Content-Type': 'application/json', 'Origin': origin,
-              'X-Lab-Token': state['token'],
-          })
-          try:
-              urllib.request.urlopen(request, timeout=2)
-          except urllib.error.HTTPError as error:
-              assert error.code == 403
-              assert json.load(error)['code'] == 'demo_read_only'
-          else:
-              raise AssertionError('Demo accepted a model launch')
-          PY
+          docker compose -f compose.yaml -f tests/compose.ci.yaml up -d reviewer-lab
+          docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab cp tests/mock_codex.py /home/lab/ci-mock-codex
+          docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab chmod 700 /home/lab/ci-mock-codex
+          python3 tests/docker_smoke.py live
+          docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab python -c 'import json,pathlib; calls=[json.loads(line) for line in (pathlib.Path.home()/"ci-mock-calls.jsonl").read_text().splitlines()]; assert len(calls)==4; assert [call["role"] for call in calls].count("attacker")==1; assert all(call["model"].startswith("ci-") for call in calls)'
+      - name: Verify run evidence and CLI home survive container recreation
+        run: |
+          docker compose -f compose.yaml -f tests/compose.ci.yaml up -d --force-recreate reviewer-lab
+          python3 tests/docker_smoke.py persistence
+          docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab test -s /home/lab/ci-mock-calls.jsonl
+          docker compose -f compose.yaml -f tests/compose.ci.yaml down
+      - name: Smoke-test explicit read-only demo over the published port
+        run: |
+          docker compose --profile demo up --build -d demo
+          python3 tests/docker_smoke.py demo
+      - if: failure()
+        run: docker compose --profile demo logs --no-color
       - if: always()
-        run: docker compose down
+        run: docker compose --profile demo down --volumes

@@ -1,18 +1,45 @@
+x-server: &server
+  build: .
+  ports:
+    - "127.0.0.1:${REVIEWER_LAB_PORT:-8765}:8765"
+  read_only: true
+  tmpfs:
+    - /tmp:size=128m,noexec,nosuid,nodev,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  stop_grace_period: 30s
+
+x-environment: &environment
+  REVIEWER_LAB_BIND: "0.0.0.0"
+  REVIEWER_LAB_PORT: "8765"
+  REVIEWER_LAB_CONTAINER: "1"
+  REVIEWER_LAB_PUBLIC_ORIGINS: "http://127.0.0.1:${REVIEWER_LAB_PORT:-8765},http://localhost:${REVIEWER_LAB_PORT:-8765}"
+
 services:
   reviewer-lab:
-    build: .
-    ports:
-      - "127.0.0.1:${REVIEWER_LAB_PORT:-8765}:8765"
+    <<: *server
     environment:
-      REVIEWER_LAB_BIND: "0.0.0.0"
-      REVIEWER_LAB_PORT: "8765"
+      <<: *environment
+      REVIEWER_LAB_DEMO: "0"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+    volumes:
+      - lab-runs:/app/runs
+      - lab-home:/home/lab
+
+  # Optional read-only service; stop reviewer-lab before using the same port.
+  demo:
+    <<: *server
+    profiles: [demo]
+    command: [python, run.py, ui, --demo]
+    environment:
+      <<: *environment
       REVIEWER_LAB_DEMO: "1"
-      REVIEWER_LAB_PUBLIC_ORIGINS: "http://127.0.0.1:${REVIEWER_LAB_PORT:-8765},http://localhost:${REVIEWER_LAB_PORT:-8765}"
-    read_only: true
-    tmpfs:
-      - /tmp:size=16m,noexec,nosuid
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    init: true
+
+volumes:
+  lab-runs:
+  lab-home:

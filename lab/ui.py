@@ -3,6 +3,7 @@ import errno
 import hashlib
 import json
 import ipaddress
+import os
 import re
 import secrets
 import signal
@@ -39,13 +40,19 @@ DEMO_MESSAGE = ("Демо: новые обращения к модели отк�
                 "Доступны сохранённые результаты и локальные тесты.")
 
 
+def container_runtime():
+    """An explicit deployment flag plus a container marker, never auto-enable live."""
+    return os.environ.get("REVIEWER_LAB_CONTAINER") == "1" and any(
+        path.is_file() for path in (Path("/.dockerenv"), Path("/run/.containerenv")))
+
+
 def validate_binding(bind, read_only):
-    """Use explicit IPv4 interfaces; network-facing serving is demo-only."""
+    """Live is local-only; Docker may listen internally on its mapped interface."""
     try:
         address = ipaddress.IPv4Address(bind)
     except (ValueError, TypeError) as exc:
         raise ValueError("bind must be an IPv4 address, e.g. 127.0.0.1 or 0.0.0.0") from exc
-    if not address.is_loopback and not read_only:
+    if not address.is_loopback and not read_only and not (address.is_unspecified and container_runtime()):
         raise ValueError("A non-loopback bind requires --demo; live model access is local-only")
 
 
@@ -569,12 +576,17 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
     if read_only:
         app.read_only = True
     validate_binding(bind, app.read_only)
-    app.live_available = ipaddress.IPv4Address(bind).is_loopback
+    loopback = ipaddress.IPv4Address(bind).is_loopback
+    container_live = not app.read_only and not loopback and container_runtime()
+    app.live_available = loopback or container_live
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("port must be 0..65535")
     # Validate before acquiring a socket; port 0 defaults resolve after binding.
     if public_origins:
         browser_origins(public_origins, port)
+    if container_live and (not public_origins or any(
+            urlsplit(origin).hostname not in ("127.0.0.1", "localhost") for origin in public_origins)):
+        raise ValueError("Live containers require explicit localhost browser origins and a loopback port mapping")
     static = Path(__file__).resolve().parent.parent / "ui"
 
     class Handler(BaseHTTPRequestHandler):

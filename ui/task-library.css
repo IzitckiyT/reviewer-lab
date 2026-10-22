@@ -39,6 +39,36 @@
 .task-detail-label {display:block;color:#8e98a6;font-size:10px;line-height:1.5}
 .task-detail-rules h2 {margin-top:7px;color:#344055;font:500 14px/1.5 var(--sans)}
 .task-detail-rules p {margin-top:9px;color:#6e798a;font-size:13px;line-height:1.8;overflow-wrap:anywhere}
+.task-detail-reference {min-width:0;padding-top:25px}
+.task-detail-reference h2 {color:#344055;font:500 16px/1.5 var(--sans)}
+.task-detail-reference>p {margin-top:7px;color:#7a8697;font-size:12px;line-height:1.8}
+.task-detail-reference code {font-family:var(--mono);font-size:11px}
+.task-reference-code {max-width:100%;margin:15px 0 0;padding:16px 18px;overflow-x:auto;border:1px solid var(--task-line);border-radius:7px;background:#fafbfd;color:#34445b;font:400 12px/1.8 var(--mono);tab-size:4}
+.task-reference-code code {font-size:12px}
+.task-reference-explainer code {color:#485d78}
+.task-detail-reference h3 {margin-top:22px;color:#526176;font:500 12px/1.5 var(--sans)}
+.task-reference-rows {list-style:none;margin:10px 0 0;padding:0;min-width:0}
+.task-reference-rows>li {display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,28%);gap:18px;margin:0;padding:13px 0;border-top:1px solid var(--task-line)}
+.task-reference-input,.task-reference-answer {display:grid;align-content:start;gap:5px;min-width:0}
+.task-reference-input>code {color:#3e506a;overflow-wrap:anywhere}
+.task-reference-input>span {color:#8a94a3;font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+.task-reference-answer>code {color:#6d7e94;line-height:1.6}
+.task-reference-answer>strong {color:#526b84;font:400 12px/1.6 var(--sans);overflow-wrap:anywhere}
+.task-reference-all {margin-top:7px;padding:13px 0;border-top:1px solid var(--task-line);border-bottom:1px solid var(--task-line)}
+.task-reference-all>summary {display:flex;align-items:center;justify-content:space-between;gap:15px;cursor:pointer;list-style:none;color:#738297;font-size:11px;line-height:1.8}
+.task-reference-all>summary::-webkit-details-marker {display:none}
+.task-reference-all>summary::after {content:'+';color:#8c97a7;font:15px/1.5 var(--sans)}
+.task-reference-all[open]>summary::after {content:'−'}
+.task-reference-all>summary:hover {color:var(--task-blue)}
+.task-reference-all>summary:focus-visible,.task-reference-code:focus-visible {outline:2px solid var(--task-blue);outline-offset:4px;border-radius:2px}
+.task-reference-all>div>p {margin-top:13px;color:#7b8799;font-size:11px;line-height:1.8}
+.task-reference-domains {display:grid;gap:12px;margin:15px 0 18px;min-width:0}
+.task-reference-domains>div {display:grid;grid-template-columns:minmax(125px,27%) minmax(0,1fr);gap:18px;min-width:0}
+.task-reference-domains dt {display:grid;gap:3px;min-width:0}
+.task-reference-domains dt code {color:#5e728e;overflow-wrap:anywhere}
+.task-reference-domains dt span {color:#939dab;font-size:10px;line-height:1.6}
+.task-reference-domains dd {margin:0;color:#6e7d92;font-size:11px;line-height:1.9;overflow-wrap:anywhere}
+.task-reference-unavailable {color:#8792a2}
 .task-detail-example {margin-top:25px;padding:22px 24px;border:1px solid #e5eaf1;border-radius:8px;background:#f8fafd}
 .task-detail-example-heading {display:flex;align-items:center;justify-content:space-between;gap:15px}
 .task-detail-scenarios {color:#97a0ac;font-size:10px;line-height:1.5}
@@ -117,12 +147,17 @@
  .task-detail-heading>p {font-size:13px}
  .task-detail-rules {gap:20px}
  .task-detail-rules p {font-size:12px}
+ .task-reference-rows>li {grid-template-columns:minmax(0,1fr) minmax(120px,28%);gap:13px}
+ .task-reference-code {padding:13px}
  .task-detail-example {padding:18px}
  .task-detail-comparison {gap:17px}
  .task-detail-comparison strong {font-size:13px}
 }
 @media(max-width:440px) {
  .task-detail-rules {grid-template-columns:1fr;gap:20px}
+ .task-reference-rows>li {grid-template-columns:1fr;gap:8px}
+ .task-reference-answer {display:flex;flex-wrap:wrap;align-items:baseline;gap:9px}
+ .task-reference-domains>div {grid-template-columns:1fr;gap:5px}
  .task-detail-comparison {grid-template-columns:1fr;gap:16px}
  .task-detail-heading h1,#case-dialog .task-detail-heading h1 {font-size:23px}
  .task-library-source {font-size:10px}

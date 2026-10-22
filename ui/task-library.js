@@ -79,6 +79,56 @@
     return run;
   }
 
+  const inputValue = value => typeof value === 'string' || typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value));
+  const pythonValue = value => typeof value === 'boolean' ? value ? 'True' : 'False'
+    : typeof value === 'string' ? JSON.stringify(value) : String(value);
+
+  // Expected answers come from the independent server specification, never from
+  // a sample patch, local copy, or an execution of the displayed original.
+  function referenceInputs(task) {
+    const {parameters, domains, expected_inputs: rows} = task;
+    const count = situationCount(task);
+    if (!Array.isArray(parameters) || !parameters.length || parameters.length > 10 ||
+        Array.from(parameters).some(name => typeof name !== 'string' || !/^[A-Za-z_]\w*$/.test(name)) ||
+        new Set(parameters).size !== parameters.length ||
+        !Array.isArray(domains) || domains.length !== parameters.length ||
+        !count || count > 1000 || domains.some(domain =>
+          Array.from(domain).some(value => !inputValue(value)) || new Set(domain).size !== domain.length) ||
+        !Array.isArray(rows) || rows.length !== count) return null;
+    const seen = new Set();
+    for (const row of rows) {
+      if (!row || !Array.isArray(row.input) || row.input.length !== parameters.length ||
+          typeof row.expected !== 'boolean' || Array.from(row.input).some((value, index) =>
+            !inputValue(value) || !domains[index].includes(value))) return null;
+      const key = JSON.stringify(row.input);
+      if (seen.has(key)) return null;
+      seen.add(key);
+    }
+    return rows;
+  }
+
+  function referenceRow(task, row) {
+    const call = `decision(${row.input.map(pythonValue).join(', ')})`;
+    return `<li><div class="task-reference-input"><code>${escape(call)}</code><span>${escape(copy.scenarioText(task.id, row.input))}</span></div><div class="task-reference-answer"><code>${pythonValue(row.expected)}</code><strong>${escape(copy.decisionText(task.id, row.expected))}</strong></div></li>`;
+  }
+
+  function referenceMarkup(task, human) {
+    const source = typeof task.original === 'string' && task.original.trim()
+      ? `<pre class="task-reference-code" tabindex="0" aria-label="Исходный код функции decision"><code>${escape(task.original)}</code></pre>`
+      : '<p class="task-reference-unavailable">Исходный код пока недоступен. Обновите страницу.</p>';
+    const rows = referenceInputs(task);
+    if (!rows) return `<section class="task-detail-reference" aria-label="Исходный правильный код"><h2>Исходный правильный код</h2><p>Это версия до изменений атакующего: она соблюдает правило задачи.</p>${source}<p class="task-reference-unavailable">Правильные ответы для входов пока недоступны. Обновите страницу.</p></section>`;
+    const examples = [];
+    const add = row => { if (row && !examples.includes(row) && examples.length < 3) examples.push(row); };
+    add(rows.find(row => row.expected));
+    add(rows.find(row => JSON.stringify(row.input) === JSON.stringify(human.example?.input)));
+    add(rows.find(row => !row.expected && !examples.includes(row)));
+    for (const row of rows) add(row);
+    const domains = task.parameters.map((name, index) => `<div><dt><code>${escape(name)}</code><span>${escape(copy.parameterLabel(task.id, name))}</span></dt><dd>${task.domains[index].map(value => `<code>${escape(pythonValue(value))}</code>`).join(', ')}</dd></div>`).join('');
+    return `<section class="task-detail-reference" aria-label="Исходный правильный код"><h2>Исходный правильный код</h2><p>Это версия до изменений атакующего: она соблюдает правило задачи.</p>${source}<p class="task-reference-explainer"><code>True</code> — действие разрешено, <code>False</code> — запрещено. Это ответ функции, а не оценка входных данных.</p><h3>Примеры правильного поведения</h3><ul class="task-reference-rows task-reference-examples">${examples.map(row => referenceRow(task, row)).join('')}</ul><details class="task-reference-all"><summary>Все входы и правильные ответы · ${rows.length}</summary><div><p>В рамках задачи допустимы только перечисленные значения. Проверяем каждую их комбинацию.</p><dl class="task-reference-domains">${domains}</dl><ul class="task-reference-rows">${rows.map(row => referenceRow(task, row)).join('')}</ul></div></details></section>`;
+  }
+
   function exampleMarkup(task, human, count, recorded) {
     const example = recorded?.witness || human.example;
     const scenario = copy.scenarioText(task.id, example.input);
@@ -114,7 +164,7 @@
     const selectionLabel = context === 'manual' ? selected ? 'Вернуться к своему коду' : 'Выбрать для своего кода'
       : selected ? context === 'launch' ? 'Вернуться к настройкам' : 'Перейти к запуску' : 'Выбрать задачу';
     const selectedLabel = context === 'manual' ? 'Текущая задача' : 'Выбрана для запуска';
-    return `<article class="task-detail"><div class="task-detail-top">${backButton}${selected ? `<span class="task-detail-selected">${selectedLabel}</span>` : ''}</div><header class="task-detail-heading"><div class="task-detail-category"><span>${escape(human.category || groupFor(task.id))}</span>${task.id.startsWith('mb_') ? '<span>MonitoringBench</span>' : ''}</div><h1>${escape(human.title)}</h1><p>${escape(human.story || human.summary || human.rule)}</p></header><div class="task-detail-rules"><section><span class="task-detail-label">Как должно быть</span><h2>Правило</h2><p>${escape(human.allowed || human.rule)}</p></section><section><span class="task-detail-label">Что ищет ревьюер</span><h2>Скрытое нарушение</h2><p>${escape(human.bug || human.violation)}</p></section></div>${exampleMarkup(task, human, count, recorded)}${human.whyItMatters ? `<p class="task-detail-why">${escape(human.whyItMatters)}</p>` : ''}${recorded ? '<p class="task-detail-example-limit">Это один ответ на конкретный патч. Он не оценивает все возможные ошибки.</p>' : '<section class="task-detail-outcome"><h2>Что покажет результат</h2><p>Если модель одобрит код с этим нарушением — она пропустила ошибку. Если отклонит — прочитайте причину: заметила ли модель именно это нарушение.</p></section>'}${sourceDetails(task)}<footer class="task-detail-footer"><div><button class="button primary task-detail-use" type="button" data-action="use-task" data-task-id="${escape(task.id)}"${contextAttribute(context)}${locked ? ' disabled' : ''}>${selectionLabel}${arrow}</button><p>${selectionNote}</p></div></footer></article>`;
+    return `<article class="task-detail"><div class="task-detail-top">${backButton}${selected ? `<span class="task-detail-selected">${selectedLabel}</span>` : ''}</div><header class="task-detail-heading"><div class="task-detail-category"><span>${escape(human.category || groupFor(task.id))}</span>${task.id.startsWith('mb_') ? '<span>MonitoringBench</span>' : ''}</div><h1>${escape(human.title)}</h1><p>${escape(human.story || human.summary || human.rule)}</p></header><div class="task-detail-rules"><section><span class="task-detail-label">Как должно быть</span><h2>Правило</h2><p>${escape(human.allowed || human.rule)}</p></section><section><span class="task-detail-label">Что ищет ревьюер</span><h2>Скрытое нарушение</h2><p>${escape(human.bug || human.violation)}</p></section></div>${referenceMarkup(task, human)}${exampleMarkup(task, human, count, recorded)}${human.whyItMatters ? `<p class="task-detail-why">${escape(human.whyItMatters)}</p>` : ''}${recorded ? '<p class="task-detail-example-limit">Это один ответ на конкретный патч. Он не оценивает все возможные ошибки.</p>' : '<section class="task-detail-outcome"><h2>Что покажет результат</h2><p>Если модель одобрит код с этим нарушением — она пропустила ошибку. Если отклонит — прочитайте причину: заметила ли модель именно это нарушение.</p></section>'}${sourceDetails(task)}<footer class="task-detail-footer"><div><button class="button primary task-detail-use" type="button" data-action="use-task" data-task-id="${escape(task.id)}"${contextAttribute(context)}${locked ? ' disabled' : ''}>${selectionLabel}${arrow}</button><p>${selectionNote}</p></div></footer></article>`;
   }
 
   const api = Object.freeze({list, detail});

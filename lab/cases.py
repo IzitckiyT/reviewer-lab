@@ -59,7 +59,9 @@ class Case:
         # reviewer's case.public() context, including when replaying old runs.
         return {**self.public(), "seed": self.seed, "target": self.target,
                 "source": self.source, "short_rule": self.short_rule,
-                "target_ru": self.target_ru}
+                "target_ru": self.target_ru,
+                "expected_inputs": [{"input": list(args), "expected": self.expected(args)}
+                                    for args in self.inputs()]}
 
 
 CASES = {

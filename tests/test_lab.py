@@ -17,6 +17,34 @@ from lab.verify import verify_run
 
 
 class OracleTests(unittest.TestCase):
+    def test_task_ui_lists_every_valid_input_and_its_independent_expected_decision(self):
+        for case in CASES.values():
+            with self.subTest(case=case.id):
+                task = case.ui()
+                rows = task['expected_inputs']
+                self.assertEqual(task['original'], case.original)
+                self.assertEqual([row['input'] for row in rows], [list(args) for args in case.inputs()])
+                self.assertTrue(all(type(row['expected']) is bool for row in rows))
+                self.assertTrue(any(row['expected'] for row in rows))
+                self.assertTrue(any(not row['expected'] for row in rows))
+                self.assertEqual([row['expected'] for row in rows],
+                                 [case.expected(args) for args in case.inputs()])
+                self.assertEqual([row['actual'] for row in evaluate(case, task['original'])['rows']],
+                                 [row['expected'] for row in rows])
+
+    def test_ui_expected_inputs_never_enter_the_reviewer_context(self):
+        for case in CASES.values():
+            self.assertIn('expected_inputs', case.ui())
+            self.assertNotIn('expected_inputs', case.public())
+            self.assertNotIn('expected_inputs', reviewer_prompt(case, case.seed))
+
+    def test_ui_expected_inputs_do_not_follow_a_modified_original(self):
+        from dataclasses import replace
+        case = replace(CASES['owner'], original='def decision(role, approved):\n    return True\n')
+        rows = case.ui()['expected_inputs']
+        self.assertEqual(next(row['expected'] for row in rows if row['input'] == ['editor', True]), False)
+        self.assertEqual(sum(row['expected'] for row in rows), 1)
+
     def test_all_fixtures_exhaustive(self):
         validate_cases(CASES.values())
         self.assertEqual({case_id: len(case.inputs()) for case_id, case in CASES.items()}, {

@@ -1,0 +1,11 @@
+# Used only by the Docker smoke job. The internal bridge has no Internet route.
+services:
+  reviewer-lab:
+    environment:
+      REVIEWER_LAB_CODEX: /home/lab/ci-mock-codex
+      DEEPSEEK_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      CLAUDE_CODE_OAUTH_TOKEN: ""
+networks:
+  default:
+    internal: true

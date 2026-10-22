@@ -3,7 +3,74 @@
 [Полное описание проекта и интерфейса](PROJECT_OVERVIEW.md) ·
 [Пошаговая инструкция](USER_GUIDE.md).
 
-## Запустить эксперимент
+## Docker: запустить приложение и новые эксперименты
+
+Требуются Docker и Compose. Из папки проекта:
+
+```sh
+cp .env.example .env
+docker compose up --build -d
+```
+
+Откройте **http://localhost:8765/#launch**. В образ включены Python, Node.js,
+Codex CLI и Claude Code. Сервер допускает новые эксперименты; само открытие
+приложения не вызывает модель. История и локальная проверка доступны без входа.
+
+Для новых ответов подключите одного провайдера:
+
+```sh
+# Codex: ссылка и одноразовый код появятся в терминале.
+docker compose exec reviewer-lab codex login --device-auth
+
+# Или Claude Code: следуйте ссылке, напечатанной CLI.
+docker compose exec reviewer-lab claude auth login
+```
+
+Для DeepSeek заполните `DEEPSEEK_API_KEY` в локальном `.env` и выполните
+`docker compose up -d --force-recreate reviewer-lab`. Реальный ключ не нужно
+добавлять в `.env.example`. Дополнительные варианты авторизации Claude
+перечислены в шаблоне окружения. Затем выберите провайдера в UI и нажмите
+**«Проверить вход»** (для настроенного API — **«Обновить статус»**);
+диагностика сама по себе ответа модели не запрашивает.
+
+Проверить подключение из контейнера:
+
+```sh
+docker compose exec reviewer-lab python run.py doctor --provider codex
+```
+
+Вместо `codex` можно указать `claude` или `deepseek`. Модели выбираются в UI,
+как и при нативном запуске. Доступ и квота зависят от аккаунта провайдера.
+Подробности авторизации: [Codex](https://developers.openai.com/codex/auth/),
+[Claude Code](https://code.claude.com/docs/en/authentication),
+[DeepSeek API](https://api-docs.deepseek.com/).
+
+Новые серии сохраняются в volume `lab-runs` (`/app/runs`), вход CLI — в
+`lab-home` (`/home/lab`). Обычный `docker compose down` сохраняет оба volume.
+Контейнер работает без root, слушает только текущий компьютер; каталоги
+компьютера и Docker socket в него не подключаются. Кандидаты вычисляются тем
+же ограниченным AST-интерпретатором, а не произвольным Python в отдельном Docker.
+
+- Остановить: `docker compose down`.
+- Продолжить пользоваться: `docker compose up -d`.
+- После обновления кода: `docker compose up --build -d`.
+- Логи: `docker compose logs -f reviewer-lab`.
+- Порт занят: задайте `REVIEWER_LAB_PORT=8766` в `.env` и повторите запуск;
+  адрес станет `http://localhost:8766`.
+
+Отдельное демо с отключёнными моделями:
+
+```sh
+docker compose stop reviewer-lab
+docker compose --profile demo up --build -d demo
+```
+
+Откройте `http://localhost:8765/#demo`, либо ваш порт из `.env`.
+Для возврата к новым экспериментам: `docker compose stop demo`, затем
+`docker compose up -d reviewer-lab`. У демо нет доступа к volume авторизации.
+Оба сервиса используют один порт, поэтому одновременно их запускать не нужно.
+
+## Нативный запуск эксперимента
 
 Нужен Python 3.10+. На macOS дважды нажмите **Start Experiment.command**.
 Или выполните из папки проекта:
@@ -58,7 +125,8 @@ python3 run.py start --live
 
 Если уже открыт локальный демо-сервер, перейдите слева в **«Новый запуск»**:
 включение новых обращений происходит при явном запуске. Старый сервер нужно
-перезапустить после обновления кода. Контейнерное демо остаётся без моделей.
+перезапустить после обновления кода. Отдельный Docker-сервис `demo` остаётся
+без моделей; основной `reviewer-lab` поддерживает новые эксперименты.
 
 Окно терминала оставьте открытым. Обычно адрес — `http://127.0.0.1:8765`;
 при занятом порте простой запуск выбирает свободный и печатает точный адрес.
@@ -66,6 +134,10 @@ python3 run.py start --live
 `REVIEWER_LAB_PORT` не подменяются.
 
 ## Подключить провайдера
+
+Следующие команды предназначены для нативного Python. Для Docker используйте
+команды `docker compose exec` из раздела выше: вход на компьютере автоматически
+в контейнер не переносится.
 
 ### Codex
 
@@ -181,24 +253,12 @@ python3 run.py
 Кнопка **«Проверить поведение · без модели»** в разделе **«Свой код»** проверяет
 код без сети. Временный результат не создаёт эксперимент в `runs/`.
 
-## Docker
-
-Требуются Docker и Compose:
-
-```sh
-cp .env.example .env
-docker compose up --build
-```
-
-Откройте `http://localhost:8765/#demo`. Для остановки — `docker compose down`.
-Если порт занят: `REVIEWER_LAB_PORT=8766 docker compose up --build`.
-Контейнер запускает демо без ключей и CLI; новые модельные обращения в нём
-отключены. Для них запустите Python на компьютере по инструкции выше.
-Контейнер слушает только текущий компьютер, работает без root и с файловой
-системой только для чтения. Docker-сборка в среде подготовки не выполнялась;
-проверки предусмотрены в [GitHub Actions](https://github.com/IzitckiyT/reviewer-lab/actions).
-
 ## Проверки и результат
+
+В Docker перед командами Python добавляйте `docker compose exec reviewer-lab`,
+например `docker compose exec reviewer-lab python run.py check`.
+Для JavaScript-тестов: `docker compose exec reviewer-lab sh -c 'node --test tests/*.cjs'`.
+Нативные команды из корня проекта:
 
 ```sh
 python3 run.py check

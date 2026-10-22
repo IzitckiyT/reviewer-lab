@@ -88,16 +88,21 @@ def _cli(provider):
 def setup_status(provider="codex"):
     """Cheap local presence only; polling must never spawn a CLI or use HTTP."""
     spec = _provider(provider)
+    container = os.environ.get("REVIEWER_LAB_CONTAINER") == "1"
     is_api = provider == "deepseek"
     cli = None if is_api else _cli(provider)
     available = bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()) if is_api else bool(cli)
     executable = cli or provider
     login_command = None if is_api else shlex.join([executable, *(["login"] if provider == "codex" else ["auth", "login"])])
+    if container and not is_api:
+        login_command = "docker compose exec reviewer-lab " + (
+            "codex login --device-auth" if provider == "codex" else "claude auth login")
     detail = (("Ключ добавлен. Его действительность и баланс проверятся при запуске." if is_api else
                "CLI установлен. Нажмите «Проверить подключение», чтобы проверить вход.") if available else
               ("Ключ DEEPSEEK_API_KEY пока не добавлен в окружение сервера." if is_api else
-               spec["label"] + " пока не установлен."))
+               spec["label"] + (" недоступен в контейнере. Пересоберите образ проекта." if container else " пока не установлен.")))
     return {"provider": provider, "available": available, "configured": available,
+            "execution_environment": "container" if container else "local",
             "ready": available if is_api else False, "message": detail, "setup_command": login_command or spec["setup"],
             "login_command": login_command,
             "models_source": {"codex": "suggested_defaults", "claude": "claude_aliases", "deepseek": "provider_catalog"}[provider],
@@ -268,6 +273,8 @@ def _claude_env():
             env[key] = os.environ[key]
     # No model/provider overrides, tracing destinations, credential helpers or
     # user-injected settings are forwarded from the launching process.
+    env["DISABLE_UPDATES"] = "1"
+    env["DISABLE_AUTOUPDATER"] = "1"
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
     return env

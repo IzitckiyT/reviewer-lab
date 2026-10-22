@@ -20,6 +20,12 @@ const savedExample = (task, overrides = {}) => ({
   checked_count: task.domains.reduce((total, domain) => total * domain.length, 1),
   controls: {safe_verdict: 'PASS', seed_verdict: 'BLOCK', healthy: true}, ...overrides,
 });
+const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[char]));
+const pythonValue = value => typeof value === 'boolean' ? value ? 'True' : 'False'
+  : typeof value === 'string' ? JSON.stringify(value) : String(value);
+const referenceBlock = html => html.match(/<section class="task-detail-reference"[\s\S]*?<\/section>/)?.[0];
 
 test('catalog exposes all eight tasks as descriptions before selection', () => {
   const html = library.list(cases, {selectedId: 'owner', context: 'launch'});
@@ -53,7 +59,7 @@ test('each detail explains the story, rule and concrete regression in human lang
     assert.equal((html.match(/data-action="use-task"/g) || []).length, 1, task.id);
     assert.match(html, /Выбор задачи ничего не запускает/);
     assert.match(html, /Если отклонит — прочитайте причину: заметила ли модель именно это нарушение/);
-    assert.doesNotMatch(html, /True|False|адаптац/u);
+    assert.doesNotMatch(html, /адаптац/u);
   }
 });
 
@@ -177,8 +183,9 @@ test('every task can show its actual checked witness and reviewer response with 
   const html = library.detail({...audit, example_run: savedExample(audit, {
     witness: {input: ['delete', false], expected: false, actual: true},
   })});
-  assert.match(html, /Удаление данных · Журнал аудита выключен/);
-  assert.doesNotMatch(html, /Запись данных · Журнал аудита выключен/);
+  const example = html.match(/<section class="task-detail-example[\s\S]*?<\/section>/)[0];
+  assert.match(example, /Удаление данных · Журнал аудита выключен/);
+  assert.doesNotMatch(example, /Запись данных · Журнал аудита выключен/);
 });
 
 test('a reviewer miss requires a verified PASS with the confirmed target regression', () => {
@@ -236,4 +243,118 @@ test('recorded model output and identifiers are escaped and never become markup 
   assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
   assert.match(html, /data-example-run="&quot;&gt;&lt;img src=x&gt;"/);
   assert.match(html, /data-example-attempt="&quot; onclick=&quot;bad\(\)"/);
+});
+
+test('all eight details expose exact baseline code before any faulty-patch example', () => {
+  for (const task of cases) {
+    const html = library.detail(task);
+    const baseline = referenceBlock(html);
+    assert.ok(baseline, task.id);
+    assert.ok(baseline.includes(`<code>${escapeHtml(task.original)}</code>`), task.id);
+    assert.match(baseline, /Исходный правильный код/);
+    assert.match(baseline, /версия до изменений атакующего/);
+    assert.ok(html.indexOf('class="task-detail-rules"') < html.indexOf(baseline), task.id);
+    assert.ok(html.indexOf(baseline) < html.indexOf('class="task-detail-example'), task.id);
+    assert.match(baseline, /<code>True<\/code> — действие разрешено, <code>False<\/code> — запрещено/);
+    assert.match(baseline, /ответ функции, а не оценка входных данных/);
+  }
+});
+
+test('each task gives three real calls with both decisions and the target situation', () => {
+  for (const task of cases) {
+    const baseline = referenceBlock(library.detail(task));
+    const examples = baseline.match(/<ul class="task-reference-rows task-reference-examples">([\s\S]*?)<\/ul>/)[1];
+    assert.equal((examples.match(/<li>/g) || []).length, 3, task.id);
+    assert.match(examples, /<code>True<\/code>/, task.id);
+    assert.match(examples, /<code>False<\/code>/, task.id);
+    const target = task.expected_inputs.find(row => JSON.stringify(row.input) === JSON.stringify(copy.get(task.id).example.input));
+    const targetCall = `decision(${target.input.map(pythonValue).join(', ')})`;
+    assert.ok(examples.includes(`<code>${escapeHtml(targetCall)}</code>`), task.id);
+    assert.ok(examples.includes(copy.scenarioText(task.id, target.input)), task.id);
+    assert.ok(examples.includes(copy.decisionText(task.id, target.expected)), task.id);
+    assert.doesNotMatch(examples, /decision\([^<]*\b(?:true|false)\b/, task.id);
+  }
+  const owner = referenceBlock(library.detail(cases.find(task => task.id === 'owner')));
+  assert.match(owner, /decision\(&quot;owner&quot;, True\)/);
+  assert.match(owner, /decision\(&quot;owner&quot;, False\)/);
+  assert.match(owner, /decision\(&quot;editor&quot;, True\)/);
+});
+
+test('closed full reference lists every finite input with the independent expected answer', () => {
+  for (const task of cases) {
+    const baseline = referenceBlock(library.detail(task));
+    const all = baseline.match(/<details class="task-reference-all">([\s\S]*?)<\/details>/)?.[1];
+    assert.ok(all, task.id);
+    assert.match(all, new RegExp(`Все входы и правильные ответы · ${task.expected_inputs.length}`), task.id);
+    assert.match(all, /В рамках задачи допустимы только перечисленные значения/);
+    assert.equal((all.match(/<li>/g) || []).length, task.expected_inputs.length, task.id);
+    assert.doesNotMatch(baseline, /<details[^>]*\bopen(?:\s|>)/);
+    for (const row of task.expected_inputs) {
+      const call = escapeHtml(`decision(${row.input.map(pythonValue).join(', ')})`);
+      const line = all.match(new RegExp(`<li>(?:(?!<\\/li>)[\\s\\S])*?<code>${call.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/code>(?:(?!<\\/li>)[\\s\\S])*?<\\/li>`));
+      assert.ok(line, `${task.id}: ${call}`);
+      assert.ok(line[0].includes(`<code>${pythonValue(row.expected)}</code>`), `${task.id}: ${call}`);
+      assert.ok(line[0].includes(copy.decisionText(task.id, row.expected)), `${task.id}: ${call}`);
+    }
+    for (let index = 0; index < task.parameters.length; index += 1) {
+      assert.ok(all.includes(`<code>${task.parameters[index]}</code>`), task.id);
+      for (const value of task.domains[index]) assert.ok(all.includes(`<code>${escapeHtml(pythonValue(value))}</code>`), task.id);
+    }
+    assert.doesNotMatch(all, /unlisted-role|decision\(&quot;superuser&quot;/);
+  }
+});
+
+test('missing or malformed independent answers never create invented correct examples', () => {
+  const task = cases.find(task => task.id === 'owner');
+  const malformed = [undefined, null, {}, [], task.expected_inputs.slice(1),
+    [...task.expected_inputs, task.expected_inputs[0]],
+    task.expected_inputs.map((row, index) => index === 0 ? {...row, expected: 'false'} : row),
+    task.expected_inputs.map((row, index) => index === 0 ? {...row, input: ['unlisted-role', false]} : row),
+    task.expected_inputs.map((row, index) => index === 0 ? {...row, input: ['owner']} : row),
+    task.expected_inputs.map((row, index) => index === 0 ? {...row, input: new Array(2)} : row),
+    task.expected_inputs.map((row, index) => index === 0 ? null : row),
+    task.expected_inputs.map((row, index) => index === 0 ? task.expected_inputs[1] : row),
+  ];
+  for (const expected_inputs of malformed) {
+    const baseline = referenceBlock(library.detail({...task, expected_inputs}));
+    assert.ok(baseline.includes(escapeHtml(task.original)));
+    assert.match(baseline, /Правильные ответы для входов пока недоступны/);
+    assert.doesNotMatch(baseline, /task-reference-rows|Все входы и правильные ответы|decision\(&quot;editor&quot;/);
+  }
+  for (const overrides of [
+    {parameters: ['role', 'role']}, {parameters: ['role', '<script>']}, {parameters: 'role'},
+    {parameters: new Array(2)}, {domains: [new Array(7), [false, true]]},
+    {domains: null}, {domains: [['owner'], [false, false]]},
+    {domains: [['owner', null], [false, true]]}, {domains: [['owner'], [NaN, Infinity]]},
+  ]) {
+    const baseline = referenceBlock(library.detail({...task, ...overrides}));
+    assert.match(baseline, /Правильные ответы для входов пока недоступны/);
+    assert.doesNotMatch(baseline, /task-reference-rows/);
+  }
+});
+
+test('code, raw calls and domains escape hostile Unicode and HTML without executing it', () => {
+  const value = '\"><script>bad()</script>\nПривет & \'мир\'';
+  const task = {...cases[0], original: `def decision(role, approved):\n    # ${value}\n    return approved\n`,
+    domains: [[value], [false, true]], expected_inputs: [
+      {input: [value, false], expected: false}, {input: [value, true], expected: true},
+    ]};
+  const baseline = referenceBlock(library.detail(task));
+  assert.doesNotMatch(baseline, /<script>|<img|onerror=/);
+  assert.ok(baseline.includes(escapeHtml(task.original)));
+  assert.ok(baseline.includes(escapeHtml(`decision(${JSON.stringify(value)}, True)`)));
+  assert.ok(baseline.includes(`<code>${escapeHtml(JSON.stringify(value))}</code>`));
+  assert.match(baseline, /Все входы и правильные ответы · 2/);
+  const noSource = referenceBlock(library.detail({...cases[0], original: null}));
+  assert.match(noSource, /Исходный код пока недоступен/);
+  assert.doesNotMatch(noSource, /undefined|<code>null<\/code>/);
+});
+
+test('correct reference never uses attack code or recorded witnesses as its oracle', () => {
+  const task = cases[0];
+  const before = referenceBlock(library.detail(task));
+  const changed = {...task, seed: 'UNTRUSTED_SEED', target: 'UNTRUSTED_TARGET',
+    example_run: savedExample(task, {witness: {input: ['owner', true], expected: false, actual: true}})};
+  assert.equal(referenceBlock(library.detail(changed)), before);
+  assert.doesNotMatch(before, /UNTRUSTED_SEED|UNTRUSTED_TARGET/);
 });

@@ -18,7 +18,7 @@ from lab.oracle import evaluate
 from lab.storage import append_json, digest, write_json
 from lab.prompts import reviewer_prompt
 from lab.transport import MODELS
-from lab.ui import (Dashboard, browser_origins, inside, journal, make_server, read_json,
+from lab.ui import (Dashboard, browser_origins, container_runtime, inside, journal, make_server, read_json,
                     run_outcome_summary, validate_binding)
 import run as cli
 
@@ -855,6 +855,38 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual(self.request('/api/state',headers={'Host':'other.example'})[0],403)
             launch.assert_not_called()
 
+    def test_container_live_accepts_authorized_start_and_keeps_host_origin_token_guards(self):
+        origin = 'http://localhost:9876'
+        with patch('lab.ui.container_runtime', return_value=True):
+            self.restart(bind='0.0.0.0', public_origins=[origin])
+        code, _, body = self.request('/api/state', headers={'Host': 'localhost:9876'})
+        self.assertEqual(code, 200)
+        self.assertFalse(json.loads(body)['read_only'])
+        self.assertTrue(self.server.dashboard.live_available)
+        payload = dict(preset='screen', case='owner', effort='medium', attempts=1, repeats=1)
+        headers = {'Host': 'localhost:9876', 'Origin': origin,
+                   'X-Lab-Token': self.server.dashboard.token}
+        with patch.object(self.server.dashboard, 'launch', return_value={'id': 'container-run'}) as launch:
+            status, _, body = self.request('/api/start', payload, headers)
+            self.assertEqual(status, 201)
+            self.assertEqual(json.loads(body)['id'], 'container-run')
+            launch.assert_called_once_with(payload)
+            launch.reset_mock()
+            for bad in (dict(headers, Host='public.example'), dict(headers, Origin='https://other.example'),
+                        dict(headers, **{'X-Lab-Token': 'wrong'})):
+                self.assertEqual(self.request('/api/start', payload, bad)[0], 403)
+            launch.assert_not_called()
+
+    def test_container_demo_cannot_be_promoted_to_live(self):
+        with patch('lab.ui.container_runtime', return_value=True):
+            self.restart(bind='0.0.0.0', read_only=True, public_origins=['http://localhost:9876'])
+        self.assertFalse(self.server.dashboard.live_available)
+        headers = {'Host': 'localhost:9876', 'Origin': 'http://localhost:9876',
+                   'X-Lab-Token': self.server.dashboard.token}
+        with patch('lab.ui.create_transport') as transport:
+            self.assertEqual(self.request('/api/enable-live', {'provider': 'codex'}, headers)[0], 403)
+            transport.assert_not_called()
+
     def test_authorized_form_passes_only_explicit_settings(self):
         payload=dict(preset='screen',case='owner',effort='medium',attempts=1,repeats=3)
         with patch.object(self.server.dashboard,'launch',return_value={'id':'stub'}) as launch:
@@ -930,6 +962,31 @@ class HTTPTests(unittest.TestCase):
 
 
 class ServerConfigurationTests(unittest.TestCase):
+    def test_container_live_binding_requires_explicit_flag_and_actual_container_marker(self):
+        with patch.dict(os.environ, {}, clear=True), patch('lab.ui.Path.is_file', return_value=True):
+            self.assertFalse(container_runtime())
+            with self.assertRaises(ValueError):
+                validate_binding('0.0.0.0', False)
+        with patch.dict(os.environ, {'REVIEWER_LAB_CONTAINER': '1'}, clear=True):
+            with patch('lab.ui.Path.is_file', return_value=False):
+                self.assertFalse(container_runtime())
+                with self.assertRaises(ValueError):
+                    validate_binding('0.0.0.0', False)
+            with patch('lab.ui.Path.is_file', side_effect=lambda path=None: True):
+                self.assertTrue(container_runtime())
+                validate_binding('0.0.0.0', False)
+                with self.assertRaises(ValueError):
+                    validate_binding('192.168.1.5', False)
+
+    def test_container_live_requires_localhost_browser_origins_before_binding(self):
+        with tempfile.TemporaryDirectory() as tmp, patch('lab.ui.container_runtime', return_value=True), \
+                patch('lab.ui.ThreadingHTTPServer') as server:
+            for origins in (None, [], ['http://public.example:8765'],
+                            ['http://localhost:8765', 'https://public.example']):
+                with self.subTest(origins=origins), self.assertRaisesRegex(ValueError, 'localhost browser origins'):
+                    make_server(tmp, 8765, bind='0.0.0.0', public_origins=origins)
+            server.assert_not_called()
+
     def test_network_facing_bind_requires_demo(self):
         validate_binding('127.0.0.1', False)
         validate_binding('0.0.0.0', True)
