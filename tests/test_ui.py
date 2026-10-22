@@ -549,6 +549,8 @@ class HTTPTests(unittest.TestCase):
             code,_,body=self.request('/api/state')
             state=json.loads(body)
             self.assertEqual(len(state['runs']),1)
+            self.assertIsInstance(state['history_examples'], list)
+            self.assertEqual(state['history_examples'], [])
             code,_,body=self.request('/api/runs/test-run')
             self.assertEqual(json.loads(body)['rows'][0]['source'],CASES['owner'].seed)
             code,_,body=self.request('/api/replay',dict(run='test-run',attempt=self.row['id']),
@@ -574,6 +576,38 @@ class HTTPTests(unittest.TestCase):
             self.assertNotIn('source', example)
             transport.assert_not_called()
             popen.assert_not_called()
+
+    def test_state_exposes_verified_history_examples_without_model_calls_or_writes(self):
+        published = Path(__file__).resolve().parents[1] / 'runs'
+        run_ids = ('replication-collision-low-2026-10-19',
+                   'replication-collision-medium-2026-10-19',
+                   'first-experiment-2026-10-19', 'example-mb_malware_chain-2026-10-21')
+        for run_id in run_ids:
+            shutil.copytree(published / run_id, Path(self.temp.name) / 'runs' / run_id)
+        before = {str(p): p.stat().st_mtime_ns for p in Path(self.temp.name).rglob('*') if p.is_file()}
+        with patch('lab.ui.create_transport') as transport, patch('lab.ui.subprocess.Popen') as popen:
+            code, _, body = self.request('/api/state')
+            self.assertEqual(code, 200)
+            examples = json.loads(body)['history_examples']
+            self.assertIsInstance(examples, list)
+            self.assertEqual([entry['id'] for entry in examples], [
+                'role-collision', 'unstable-verdict', 'attacker-revision', 'external-health-file'])
+            for entry in examples:
+                self.assertTrue(entry['verified'])
+                self.assertIn(entry['run_id'], run_ids)
+                self.assertTrue(entry['controls']['healthy'])
+                self.assertNotIn('prompt', entry)
+                self.assertNotIn('source', entry)
+                _, _, detail = self.request('/api/runs/' + entry['run_id'])
+                row = next(row for row in json.loads(detail)['rows'] if row['id'] == entry['attempt_id'])
+                self.assertEqual(entry['source_sha256'], row['source_sha256'])
+                scenario = row['oracle']['rows'][entry['scenario_index']]
+                self.assertEqual({key: scenario[key] for key in entry['witness']}, entry['witness'])
+            self.assertEqual(json.loads(self.request('/api/state')[2])['history_examples'], examples)
+            transport.assert_not_called()
+            popen.assert_not_called()
+        after = {str(p): p.stat().st_mtime_ns for p in Path(self.temp.name).rglob('*') if p.is_file()}
+        self.assertEqual(before, after)
 
     def test_history_dedup_keeps_original_run_http_url_available(self):
         original, _ = example_fixture(self.temp.name, run_id='ui-original')
@@ -620,19 +654,24 @@ class HTTPTests(unittest.TestCase):
         self.assertLess(body.index(b'src="/case-copy.js"'), body.index(b'src="/task-library.js"'))
         self.assertLess(body.index(b'src="/task-library.js"'), body.index(b'src="/app.js"'))
         self.assertLess(body.index(b'src="/scenario-detail.js"'), body.index(b'src="/app.js"'))
+        self.assertLess(body.index(b'src="/case-copy.js"'), body.index(b'src="/history-examples.js"'))
+        self.assertLess(body.index(b'src="/history-examples.js"'), body.index(b'src="/app.js"'))
+        self.assertIn(b'href="/history-examples.css"', body)
         self.assertNotIn(b'present-button', body)
         self.assertIn(b'id="scenario-dialog"', body)
-        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView'), ('task-library.js', b'LabTaskLibrary'), ('scenario-detail.js', b'LabScenarioDetail')]:
+        for name, marker in [('case-copy.js', b'LabCaseCopy'), ('test-explanation.js', b'LabTestView'), ('task-library.js', b'LabTaskLibrary'), ('scenario-detail.js', b'LabScenarioDetail'), ('history-examples.js', b'LabHistoryExamples')]:
             code, headers, body = self.request('/' + name)
             self.assertEqual(code, 200)
             self.assertEqual(headers['Content-Type'], 'text/javascript; charset=utf-8')
             self.assertIn(marker, body)
         self.assertEqual(self.request('/../case-copy.js')[0], 404)
-        for name in ('task-library.css', 'navigation.css', 'scenario-detail.css'):
+        for name in ('task-library.css', 'navigation.css', 'scenario-detail.css', 'history-examples.css'):
             code, headers, _ = self.request('/' + name)
             self.assertEqual(code, 200)
             self.assertEqual(headers['Content-Type'], 'text/css; charset=utf-8')
         self.assertEqual(self.request('/../task-library.js')[0], 404)
+        self.assertEqual(self.request('/../history-examples.js')[0], 404)
+        self.assertEqual(self.request('/../history-examples.css')[0], 404)
 
     def test_cross_origin_and_missing_token_cannot_start_run(self):
         payload=dict(preset='feedback',case='owner',effort='medium',attempts=2,repeats=1)
@@ -651,6 +690,39 @@ class HTTPTests(unittest.TestCase):
             launch.assert_called_once_with(payload)
         self.assertEqual(self.request('/api/runs/..')[0],404)
         self.assertEqual(self.request('/anything-on-disk')[0],404)
+
+    def test_explicit_attacker_model_reaches_cli_for_each_provider(self):
+        configurations = (('codex', 'gpt-5.6-luna', 'gpt-6.1-sol'),
+                          ('claude', 'haiku', 'opus'),
+                          ('deepseek', 'deepseek-flash', 'deepseek-v4-pro'))
+        with patch('lab.ui.subprocess.Popen') as popen, patch('lab.ui.create_transport') as transport:
+            popen.return_value.poll.return_value = 0
+            for provider, reviewer, attacker in configurations:
+                with self.subTest(provider=provider):
+                    payload = dict(preset='feedback', case='owner', effort='medium', attempts=1,
+                        repeats=1, provider=provider, reviewer_model=reviewer, attacker_model=attacker)
+                    code, _, body = self.request('/api/start', payload,
+                        {'X-Lab-Token': self.server.dashboard.token})
+                    self.assertEqual(code, 201, body)
+                    args = popen.call_args.args[0]
+                    self.assertEqual(args[args.index('--provider') + 1], provider)
+                    self.assertEqual(args[args.index('--reviewer-model') + 1], reviewer)
+                    self.assertEqual(args[args.index('--attacker-model') + 1], attacker)
+                    self.assertEqual(args[args.index('--modes') + 1], 'feedback')
+                    self.assertNotIn('shell', popen.call_args.kwargs)
+            self.assertEqual(popen.call_count, len(configurations))
+            transport.assert_not_called()
+
+    def test_invalid_attacker_model_cannot_start_cli(self):
+        with patch('lab.ui.subprocess.Popen') as popen:
+            for attacker in ('model; echo unsafe', 'model\nother', ['opus'], {'model': 'opus'}):
+                with self.subTest(attacker=attacker):
+                    payload = dict(preset='feedback', case='owner', effort='medium', attempts=1,
+                        repeats=1, provider='claude', reviewer_model='haiku', attacker_model=attacker)
+                    code, _, _ = self.request('/api/start', payload,
+                        {'X-Lab-Token': self.server.dashboard.token})
+                    self.assertIn(code, (400, 409))
+            popen.assert_not_called()
 
     def test_manual_check_accepts_code_and_does_not_start_a_process(self):
         source = '# ' + 'x' * 6000 + '\n' + CASES['owner'].seed

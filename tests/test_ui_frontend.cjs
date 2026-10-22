@@ -14,6 +14,7 @@ const rendererSource = source.replace(/\ninit\(\);\s*$/, '\n');
 function harness({respond, allowPost = false} = {}) {
   const nodes = new Map();
   const listeners = new Map();
+  const windowListeners = new Map();
   const requests = [];
   const storage = new Map();
   let hash = '';
@@ -31,7 +32,9 @@ function harness({respond, allowPost = false} = {}) {
     document: {querySelector: node, querySelectorAll: () => [], addEventListener(type, listener) {
       listeners.set(type, [...(listeners.get(type) || []), listener]);
     }},
-    window: {addEventListener() {}, scrollTo() {}},
+    window: {addEventListener(type, listener) {
+      windowListeners.set(type, [...(windowListeners.get(type) || []), listener]);
+    }, scrollTo() {}},
     location: {get hash() { return hash; }, set hash(value) {
       hash = value ? '#' + String(value).replace(/^#/, '') : '';
     }},
@@ -47,7 +50,7 @@ function harness({respond, allowPost = false} = {}) {
       return {ok: true, json: async () => value};
     },
   });
-  for (const file of ['case-copy.js', 'test-explanation.js', 'scenario-detail.js', 'provider-setup.js', 'run-story.js', 'task-library.js', 'attack-story.js']) {
+  for (const file of ['case-copy.js', 'test-explanation.js', 'scenario-detail.js', 'provider-setup.js', 'run-story.js', 'task-library.js', 'attack-story.js', 'history-examples.js']) {
     const helper = path.join(__dirname, '..', 'ui', file);
     if (fs.existsSync(helper)) vm.runInContext(fs.readFileSync(helper, 'utf8'), context, {filename: 'ui/' + file});
   }
@@ -64,7 +67,10 @@ function harness({respond, allowPost = false} = {}) {
     const button = {dataset, disabled: false};
     await emit('click', {target: {closest: () => button}});
   };
-  return {run, node, click, emit, requests, storage};
+  const emitWindow = async (type, event = {}) => {
+    for (const listener of windowListeners.get(type) || []) await listener(event);
+  };
+  return {run, node, click, emit, emitWindow, requests, storage};
 }
 
 function attempt(overrides = {}) {
@@ -1438,7 +1444,7 @@ test('demo manual and direct launch expose a real model action and keep setup co
   h.run('renderLaunch()');html=h.node('#main').innerHTML;
   assert.match(html,/id="launch-form"|id="start-button"/);
   assert.equal(h.node('#start-button').disabled,false);
-  closedDisclosure(html,'Режим и дополнительные настройки');
+  closedDisclosure(html,'Лимиты и повторы');
   assert.match(html,/квота или баланс/);
   assert.equal((html.match(/id="start-button"/g)||[]).length,1);
   assert.deepEqual(h.requests,[]);
@@ -1545,7 +1551,7 @@ test('explicit demo launch enables the chosen provider before starting exactly o
   assert.equal(posts[1][0],'/api/start');
   assert.equal(posts[1][1].provider,'claude');
   assert.equal(posts[1][1].reviewer_model,'custom-review');
-  assert.equal(posts[1][1].attacker_model,'custom-generate');
+  assert.equal(posts[1][1].attacker_model,'sonnet','A ready-patch screening ignores the inactive attacker selection');
   assert.equal(h.run('state.run'),'new-live');
 });
 
@@ -1860,8 +1866,9 @@ test('the visible task chooser is first and keeps the eight-case library off the
   assert.match(page,/<select id="case" name="case"[^>]*hidden/);
   assert.ok(page.indexOf('id="case-field"')<page.indexOf('id="launch-provider"'));
   assert.doesNotMatch(page,/data-case-option=/);
-  const advanced=closedDisclosure(page,'Режим и дополнительные настройки');
-  assert.match(advanced,/<label for="preset">Режим проверки<\/label>/);
+  const advanced=closedDisclosure(page,'Лимиты и повторы');
+  assert.doesNotMatch(advanced,/id="preset"|id="attacker-model"/);
+  assert.match(page.slice(0,page.indexOf('<details class="launch-advanced">')),/<label for="preset">Режим проверки<\/label>/);
   assert.equal((page.match(/id="start-button"/g)||[]).length,1);
   assert.deepEqual(h.requests,[]);
 });
@@ -2190,4 +2197,368 @@ test('the finished banner describes the chosen successful example rather than a 
   assert.match(banner,/Выбранная попытка · серия 2 · 1/);
   assert.match(banner,/Модель пропустила ошибку/);
   assert.doesNotMatch(banner,/Патч отклонён|LATER_REASON|Последняя попытка/);
+});
+
+function historyFixture() {
+  const selected=attempt({id:'editorial-selected',source:'EXACT_EDITORIAL_SOURCE',source_sha256:'verified-source-hash',repeat:2});
+  const later=attempt({id:'editorial-later',source:'OTHER_SOURCE',source_sha256:'other-hash',repeat:3,success:false,reviewer:{verdict:'BLOCK',reason:'LATER_BLOCK_REASON'}});
+  const record={...detail,id:'editorial-run',manifest:{...detail.manifest,status:'completed',cases:['owner'],experiment_kind:'candidate_screen',attempts_per_run:1,repeats:3,modes:['independent']},rows:[selected,later],calls:[]};
+  const example={id:'role-collision',kind:'collision',verified:true,run_id:record.id,attempt_id:selected.id,case:'owner',source_sha256:selected.source_sha256,scenario_index:0,
+    title:'Редактор стал владельцем',lead:'СОХРАНЁННОЕ ОБЪЯСНЕНИЕ',before:'Только владелец',change:'Вычисленные роли',after:'Редактор получил доступ',
+    outcome:'missed',verdict:'PASS',model:'saved-reviewer',date:'2026-10-19T16:00:00Z',witness:{input:['editor',true],expected:false,actual:true},comparison:[{label:'Владелец',value:'830'},{label:'Редактор',value:'830'}]};
+  return {record,example,selected};
+}
+
+function prepareHistory(h,fixture=historyFixture()) {
+  const {record,example}=fixture;
+  h.run('state.data.history_examples=[example];state.data.runs=[record];state.data.cases=chooserCases;state.view="runs";state.runOpen=false;state.runFilter="examples";state.details.set(record.id,record);location.hash="runs/examples";renderRunList()',{record,example,chooserCases});
+  return fixture;
+}
+
+test('History examples is a read-only tab with distinct gallery and all-experiment routes',async()=>{
+  const h=harness();prepareHistory(h);
+  const gallery=h.node('#main').innerHTML;
+  assert.match(gallery,/Показательные примеры/);
+  assert.match(gallery,/data-action="open-history-example" data-example-id="role-collision"/);
+  assert.match(gallery,/СОХРАНЁННОЕ ОБЪЯСНЕНИЕ/);
+  assert.doesNotMatch(gallery,/class="runs-layout"|data-action="start/);
+  await h.click({filter:'all'});
+  assert.equal(h.run('location.hash'),'#runs');
+  assert.equal(h.run('state.runFilter'),'all');
+  assert.match(h.node('#main').innerHTML,/class="runs-layout"/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/history-example-feature/);
+  await h.click({filter:'examples'});
+  assert.equal(h.run('location.hash'),'#runs/examples');
+  assert.equal(h.run('state.runFilter'),'examples');
+  assert.match(h.node('#main').innerHTML,/history-example-feature/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('History example deep links restore the exact example and browser back returns to the gallery',async()=>{
+  const fixture=historyFixture(),{record,example,selected}=fixture;
+  const h=harness({respond:url=>{assert.equal(url,'/api/runs/'+record.id);return record;}});
+  prepareHistory(h,fixture);
+  h.run('location.hash="runs/examples/role-collision"');
+  assert.equal(h.run('currentRoute().runId'),record.id);
+  await h.emitWindow('hashchange');
+  assert.equal(h.run('state.historyExample.id'),example.id);
+  assert.equal(h.run('state.attempt'),selected.id);
+  assert.equal(h.run('state.runOpen'),true);
+  assert.match(h.node('#main').innerHTML,/Объяснение сохранённого примера/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-story-attempt="editorial-selected"[^>]* open/);
+  h.run('location.hash="runs/examples"');await h.emitWindow('hashchange');
+  assert.equal(h.run('state.runOpen'),false);
+  assert.equal(h.run('state.historyExample'),null);
+  assert.match(h.node('#main').innerHTML,/history-example-feature/);
+  h.run('location.hash="runs/examples/does-not-exist"');
+  assert.equal(h.run('currentRoute().runId'),null);
+  await h.emitWindow('hashchange');
+  assert.equal(h.run('state.runOpen'),false);
+  assert.deepEqual(h.requests,['/api/runs/'+record.id]);
+});
+
+test('opening a History example selects its exact saved source rather than the last repeated review',async()=>{
+  const fixture=historyFixture(),{record,example,selected}=fixture;
+  const h=harness({respond:url=>{assert.equal(url,'/api/runs/'+record.id);return record;}});
+  prepareHistory(h,fixture);
+  h.run('state.manual.source="MY_UNSENT_CODE";state.launchCase="audit";state.reviewerModels.codex="MY_REVIEWER"');
+  await h.click({action:'open-history-example',exampleId:example.id});
+  assert.equal(h.run('location.hash'),'#runs/examples/'+example.id);
+  assert.equal(h.run('state.run'),record.id);
+  assert.equal(h.run('state.attempt'),selected.id);
+  assert.equal(h.run('state.exampleAttempt.attemptId'),selected.id);
+  assert.equal(h.run('state.attemptOpen'),false);
+  assert.equal(h.run('state.manual.source'),'MY_UNSENT_CODE');
+  assert.equal(h.run('state.launchCase'),'audit');
+  assert.equal(h.run('state.reviewerModels.codex'),'MY_REVIEWER');
+  assert.match(h.node('#main').innerHTML,/СОХРАНЁННОЕ ОБЪЯСНЕНИЕ/);
+  const banner=h.node('#main').innerHTML.split('<section class="experiment-detail">')[0];
+  assert.match(banner,/Выбранная попытка · серия 2/);
+  assert.match(banner,/Модель пропустила ошибку/);
+  assert.doesNotMatch(banner,/LATER_BLOCK_REASON/);
+  assert.deepEqual(h.requests,['/api/runs/'+record.id]);
+});
+
+test('History example references reject unknown ids, unverified entries and changed case, attempt or source',async()=>{
+  const fixture=historyFixture();
+  const quiet=harness();prepareHistory(quiet,fixture);
+  for(const id of ['missing','../../api/start',''])await quiet.click({action:'open-history-example',exampleId:id});
+  quiet.run('state.data.history_examples[0].verified=false');
+  await quiet.click({action:'open-history-example',exampleId:fixture.example.id});
+  assert.equal(quiet.run('state.runOpen'),false);
+  assert.deepEqual(quiet.requests,[]);
+  for(const change of [row=>({...row,id:'changed-attempt'}),row=>({...row,case:'audit'}),row=>({...row,source_sha256:'changed-source-hash'})]) {
+    const fresh=historyFixture();
+    const altered={...fresh.record,rows:[change(fresh.selected)]};
+    const h=harness({respond:()=>altered});prepareHistory(h,fresh);
+    await h.click({action:'open-history-example',exampleId:fresh.example.id});
+    assert.equal(h.run('state.runOpen'),false);
+    assert.equal(h.run('state.historyExample'),null);
+    assert.equal(h.run('location.hash'),'#runs/examples');
+    assert.deepEqual(h.requests,['/api/runs/'+fresh.record.id]);
+  }
+});
+
+test('History scenario replays the exact verified input locally and never sends a new model request',async()=>{
+  const fixture=historyFixture(),{record,example,selected}=fixture;
+  const h=harness({allowPost:true,respond:async(url,options)=>{
+    assert.equal(url,'/api/explain-scenario');assert.equal(options.method,'POST');
+    assert.equal(options.headers['X-Lab-Token'],'history-token');
+    assert.deepEqual(JSON.parse(options.body),{case:'owner',source:selected.source,index:0});
+    return {case:'owner',index:0,input_values:['editor',true],expected:false,actual:true,source_sha256:selected.source_sha256,events:[],truncated:false};
+  }});
+  prepareHistory(h,fixture);
+  h.run('state.data.token="history-token";selectHistoryExample(example);navigate("runs",record.id);state.manual.source="UNCHANGED_DRAFT"',{example,record});
+  await h.click({action:'history-example-scenario',exampleId:example.id});
+  assert.equal(h.node('#scenario-dialog').open,true);
+  assert.match(h.node('#scenario-body').innerHTML,/Редактор/);
+  assert.match(h.node('#scenario-body').innerHTML,/SAVED_REVIEWER_REASON/);
+  assert.doesNotMatch(h.node('#scenario-body').innerHTML,/LATER_BLOCK_REASON/);
+  assert.equal(h.run('state.manual.source'),'UNCHANGED_DRAFT');
+  assert.equal(h.run('state.attempt'),selected.id);
+  assert.deepEqual(h.requests,['/api/explain-scenario']);
+});
+
+test('History diff opens only the named verified attempt and an unselected example cannot open anything',async()=>{
+  const h=harness(),fixture=prepareHistory(h),{record,example,selected}=fixture;
+  h.run('selectHistoryExample(example);navigate("runs",record.id)',{example,record});
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-story-attempt="editorial-selected"[^>]* open/);
+  await h.click({action:'history-example-diff',exampleId:'wrong-example'});
+  assert.equal(h.run('state.historyExample.diffOpen'),false);
+  await h.click({action:'history-example-diff',exampleId:example.id});
+  assert.equal(h.run('state.historyExample.diffOpen'),true);
+  assert.equal(h.run('state.attempt'),selected.id);
+  assert.match(h.node('#main').innerHTML,/data-story-attempt="editorial-selected"[^>]* open/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-story-attempt="editorial-later"[^>]* open/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('History scenario refuses mismatched witness, changed source and actions outside its run',async()=>{
+  for(const mutate of [
+    'state.data.history_examples[0].witness.input=["owner",true]',
+    'state.data.history_examples[0].witness.actual=false',
+    'state.data.history_examples[0].scenario_index=2',
+    'state.details.get(record.id).rows[0].source_sha256="changed"',
+    'state.view="tasks"', 'state.runOpen=false',
+  ]) {
+    const h=harness(),{record,example}=prepareHistory(h);
+    h.run('selectHistoryExample(example);navigate("runs",record.id)',{record,example});
+    h.run(mutate,{record});
+    await h.click({action:'history-example-scenario',exampleId:example.id});
+    assert.notEqual(h.node('#scenario-dialog').open,true);
+    assert.deepEqual(h.requests,[]);
+  }
+});
+
+test('a late History example response cannot hijack navigation to tasks',async()=>{
+  const fixture=historyFixture(),{record,example}=fixture;
+  let complete;
+  const h=harness({respond:()=>new Promise(resolve=>{complete=resolve;})});prepareHistory(h,fixture);
+  const pending=h.click({action:'open-history-example',exampleId:example.id});
+  await h.click({view:'tasks'});
+  complete(record);await pending;
+  assert.equal(h.run('state.view'),'tasks');
+  assert.equal(h.run('location.hash'),'#tasks');
+  assert.equal(h.run('state.runOpen'),false);
+  assert.equal(h.run('state.historyExample'),null);
+  assert.doesNotMatch(h.node('#main').innerHTML,/Объяснение сохранённого примера/);
+  assert.deepEqual(h.requests,['/api/runs/'+record.id]);
+});
+
+test('polling removes a revoked History proof without creating a model request or replacing the saved run',async()=>{
+  const fixture=historyFixture(),{record,example}=fixture;
+  const h=harness({respond:url=>{
+    if(url==='/api/state')return {cases:chooserCases,runs:[record],active:{running:false},history_examples:[]};
+    assert.equal(url,'/api/runs/'+record.id);return record;
+  }});
+  prepareHistory(h,fixture);
+  h.run('selectHistoryExample(example);navigate("runs",record.id)',{example,record});
+  assert.match(h.node('#main').innerHTML,/СОХРАНЁННОЕ ОБЪЯСНЕНИЕ/);
+  h.node('#history-example-slot').innerHTML=h.run('historyExampleMarkup(record)',{record});
+  await h.run('pollOnce()');
+  assert.equal(h.run('state.historyExample'),null);
+  assert.equal(h.node('#history-example-slot').innerHTML,'');
+  assert.equal(h.run('state.run'),record.id);
+  assert.equal(h.run('state.runOpen'),true);
+  await h.click({action:'history-example-scenario',exampleId:example.id});
+  await h.click({action:'history-example-diff',exampleId:example.id});
+  assert.notEqual(h.node('#scenario-dialog').open,true);
+  assert.deepEqual(h.requests,['/api/state','/api/runs/'+record.id]);
+});
+
+test('a History proof revoked while its record loads cannot reopen an obsolete example',async()=>{
+  for(const replacement of ['[]','[{...example,source_sha256:"replacement-hash"}]','[{...example,attempt_id:"replacement-attempt"}]']) {
+    const fixture=historyFixture(),{record,example}=fixture;
+    let complete;
+    const h=harness({respond:()=>new Promise(resolve=>{complete=resolve;})});prepareHistory(h,fixture);
+    const pending=h.click({action:'open-history-example',exampleId:example.id});
+    h.run('state.data.history_examples='+replacement,{example});
+    complete(record);await pending;
+    assert.equal(h.run('state.runOpen'),false);
+    assert.equal(h.run('state.historyExample'),null);
+    assert.equal(h.run('location.hash'),'#runs/examples');
+  }
+});
+
+function attackerFields(h,values={}) {
+  return launchFields(h,{preset:'feedback',provider:'claude',reviewer_model:'opus',reviewer_model_custom:'',attacker_model:'sonnet',attacker_model_custom:'',attempts:'2',repeats:'1',...values});
+}
+
+test('attacker and mode selectors are visible outside advanced settings and selecting a model never starts it',async()=>{
+  const h=harness(),fields=attackerFields(h);
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="opus";state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  const page=h.node('#main').innerHTML;
+  const visibleSetup=page.slice(0,page.indexOf('<details class="launch-advanced">'));
+  assert.match(visibleSetup,/<select id="preset"/);
+  assert.match(visibleSetup,/<select id="attacker-model" name="attacker_model"/);
+  assert.match(visibleSetup,/Модель атакующего/);
+  assert.match(visibleSetup,/<option value="sonnet" selected>/);
+  assert.match(visibleSetup,/<option value="opus"/);
+  assert.match(visibleSetup,/<option value="haiku"/);
+  assert.equal(h.node('#attacker-model-field').hidden,false);
+  assert.equal(fields.attacker_model.disabled,false);
+  fields.attacker_model.value='haiku';
+  await h.emit('change',{target:{id:'attacker-model',value:'haiku'}});
+  assert.equal(h.run('attackerValue()'),'haiku');
+  assert.equal(h.run('chosenAttacker()'),'haiku');
+  assert.equal(h.run('reviewerValue()'),'opus');
+  assert.equal(h.run('chosenReviewer()'),'opus');
+  assert.match(h.node('#launch-model-summary').textContent,/Ревьюер · opus.*Атакующий: haiku/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('attacker defaults include its own role model even when the provider catalog is empty',()=>{
+  const h=harness();attackerFields(h,{provider:'deepseek',reviewer_model:'deepseek-chat',attacker_model:'deepseek-reasoner'});
+  h.run('state.data.providers=fixtures;state.providerId="deepseek";state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  const picker=h.run('modelPickerMarkup("launch",selectedProvider(),"attacker")');
+  assert.match(picker,/<option value="deepseek-reasoner" selected>/);
+  assert.equal(h.run('chosenAttacker()'),'deepseek-reasoner');
+  assert.equal(h.run('chosenReviewer()'),'deepseek-chat');
+  assert.equal((picker.match(/value="deepseek-reasoner"/g)||[]).length,1);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('attacker catalog and custom choices persist separately for each provider and never overwrite reviewer choices',async()=>{
+  const h=harness(),fields=attackerFields(h);
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="opus";state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  fields.attacker_model.value='haiku';await h.emit('change',{target:{id:'attacker-model',value:'haiku'}});
+  await h.emit('change',{target:{id:'launch-provider',value:'codex'}});
+  assert.equal(fields.attacker_model.value,'gpt-6.1-sol');
+  assert.equal(fields.reviewer_model.value,'gpt-5.6-luna');
+  fields.attacker_model.value='__custom__';fields.attacker_model_custom.value=' my-attack-model ';
+  await h.emit('change',{target:{id:'attacker-model',value:'__custom__'}});
+  assert.equal(h.node('#attacker-model-custom').hidden,false);
+  assert.equal(fields.attacker_model_custom.required,true);
+  await h.emit('input',{target:{id:'attacker-model-custom',value:' my-attack-model '}});
+  assert.equal(h.run('state.attackerModels.codex'),'my-attack-model');
+  assert.equal(h.run('chosenReviewer()'),'gpt-5.6-luna');
+  await h.emit('change',{target:{id:'launch-provider',value:'claude'}});
+  assert.equal(fields.attacker_model.value,'haiku');
+  assert.equal(fields.reviewer_model.value,'opus');
+  await h.emit('change',{target:{id:'launch-provider',value:'codex'}});
+  assert.equal(fields.attacker_model.value,'__custom__');
+  assert.equal(fields.attacker_model_custom.value,'my-attack-model');
+  assert.equal(fields.reviewer_model.value,'gpt-5.6-luna');
+  assert.equal(h.run('state.reviewerModels.claude'),'opus');
+  assert.deepEqual(h.requests,[]);
+});
+
+test('custom attacker is sent as the exact selected model only when explicitly launching feedback or comparison',async()=>{
+  for(const preset of ['feedback','compare']) {
+    let submitted;
+    const h=harness({allowPost:true,respond:(url,options)=>{
+      assert.equal(url,'/api/start');submitted=JSON.parse(options.body);throw new Error('Request captured by test');
+    }});
+    const fields=attackerFields(h,{preset,attacker_model:'__custom__',attacker_model_custom:' custom-attacker-v2 '});
+    h.run('state.data.providers=fixtures;state.providerId="claude";state.data.read_only=false;state.view="launch";state.reviewerModels.claude="opus";renderLaunch()',{fixtures:providerFixtures});
+    await h.emit('change',{target:{id:'attacker-model',value:'__custom__'}});
+    await h.emit('input',{target:{id:'attacker-model-custom',value:fields.attacker_model_custom.value}});
+    assert.deepEqual(h.requests,[]);
+    assert.equal(h.node('#start-button').disabled,false);
+    const form=h.node('#launch-form');form.id='launch-form';
+    await h.emit('submit',{target:form,preventDefault(){}});
+    assert.equal(submitted.preset,preset);
+    assert.equal(submitted.provider,'claude');
+    assert.equal(submitted.attacker_model,'custom-attacker-v2');
+    assert.equal(submitted.reviewer_model,'opus');
+    assert.equal(submitted.attempts,preset==='compare'?4:2);
+    assert.deepEqual(h.requests,['/api/start']);
+  }
+});
+
+test('blank custom attacker blocks search and comparison without enabling or invoking a provider',async()=>{
+  for(const preset of ['feedback','compare']) {
+    const h=harness({allowPost:true,respond:()=>{throw new Error('No request permitted');}});
+    const fields=attackerFields(h,{preset,attacker_model:'__custom__',attacker_model_custom:'   '});
+    h.run('state.data.providers=fixtures;state.providerId="claude";state.data.read_only=true;state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+    await h.emit('change',{target:{id:'attacker-model',value:'__custom__'}});
+    assert.equal(h.run('chosenAttacker()'),'');
+    assert.equal(h.run('chosenReviewer()'),'opus');
+    assert.equal(h.node('#start-button').disabled,true);
+    assert.equal(fields.attacker_model_custom.required,true);
+    const form=h.node('#launch-form');form.id='launch-form';
+    await h.emit('submit',{target:form,preventDefault(){}});
+    assert.match(h.node('#launch-error').innerHTML,/Укажите ID модели атакующего/);
+    assert.deepEqual(h.requests,[]);
+  }
+});
+
+test('ready-patch screening hides and disables the attacker and ignores its blank custom value',async()=>{
+  let submitted;
+  const h=harness({allowPost:true,respond:(url,options)=>{
+    assert.equal(url,'/api/start');submitted=JSON.parse(options.body);throw new Error('Request captured by test');
+  }});
+  const fields=attackerFields(h,{preset:'screen',attacker_model:'__custom__',attacker_model_custom:''});
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.data.read_only=false;state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  assert.equal(h.run('chosenAttacker()'),'');
+  assert.equal(h.node('#attacker-model-field').hidden,true);
+  assert.equal(fields.attacker_model.disabled,true);
+  assert.equal(fields.attacker_model_custom.disabled,true);
+  assert.equal(fields.attacker_model_custom.required,false);
+  assert.equal(h.node('#start-button').disabled,false);
+  assert.doesNotMatch(h.node('#launch-model-summary').textContent,/Атакующий/);
+  const form=h.node('#launch-form');form.id='launch-form';
+  await h.emit('submit',{target:form,preventDefault(){}});
+  assert.equal(submitted.preset,'screen');
+  assert.equal(submitted.reviewer_model,'opus');
+  assert.equal(submitted.attacker_model,'sonnet','The backend receives its compatibility default, never the inactive custom choice');
+  assert.deepEqual(h.requests,['/api/start']);
+});
+
+test('provider catalog refresh retains a custom attacker and the independently chosen reviewer',async()=>{
+  const refreshed=providerFixtures.map(provider=>provider.id==='claude'?{...provider,models:['new-catalog-model']}:provider);
+  const h=harness({allowPost:true,respond:(url,options)=>{
+    assert.equal(url,'/api/providers/check');assert.deepEqual(JSON.parse(options.body),{provider:'claude'});
+    return {providers:refreshed,live_available:true};
+  }});
+  const fields=attackerFields(h,{reviewer_model:'__custom__',reviewer_model_custom:'my-reviewer',attacker_model:'__custom__',attacker_model_custom:'my-attacker'});
+  h.run('state.data.providers=fixtures;state.providerId="claude";state.reviewerModels.claude="my-reviewer";state.attackerModels.claude="my-attacker";state.view="launch";renderLaunch()',{fixtures:providerFixtures});
+  await h.click({action:'refresh-providers'});
+  assert.equal(fields.attacker_model.value,'__custom__');
+  assert.equal(fields.attacker_model_custom.value,'my-attacker');
+  assert.equal(fields.reviewer_model.value,'__custom__');
+  assert.equal(fields.reviewer_model_custom.value,'my-reviewer');
+  assert.equal(h.run('chosenAttacker()'),'my-attacker');
+  assert.equal(h.run('chosenReviewer()'),'my-reviewer');
+  assert.match(h.node('#attacker-model-field').innerHTML,/new-catalog-model/);
+  assert.match(h.node('#launch-model-summary').textContent,/my-reviewer.*my-attacker/);
+  assert.deepEqual(h.requests,['/api/providers/check']);
+});
+
+test('reading a task and returning preserves the custom attacker draft independently of reviewer and case',async()=>{
+  const h=harness(),fields=attackerFields(h,{attacker_model:'__custom__',attacker_model_custom:'selected-attacker'});
+  h.run('state.data.providers=fixtures;state.data.cases=chooserCases;state.providerId="claude";state.reviewerModels.claude="opus";state.view="launch";renderLaunch()',{fixtures:providerFixtures,chooserCases});
+  await h.emit('change',{target:{id:'attacker-model',value:'__custom__'}});
+  await h.emit('input',{target:{id:'attacker-model-custom',value:'selected-attacker'}});
+  await h.click({view:'tasks'});
+  assert.equal(h.run('state.launchDraft.attacker_model'),'__custom__');
+  assert.equal(h.run('state.launchDraft.attacker_model_custom'),'selected-attacker');
+  fields.attacker_model.value='sonnet';fields.attacker_model_custom.value='';
+  await h.click({view:'launch'});
+  assert.equal(fields.attacker_model.value,'__custom__');
+  assert.equal(fields.attacker_model_custom.value,'selected-attacker');
+  assert.equal(h.run('chosenAttacker()'),'selected-attacker');
+  assert.equal(h.run('chosenReviewer()'),'opus');
+  assert.equal(h.run('state.launchCase'),'owner');
+  assert.deepEqual(h.requests,[]);
 });

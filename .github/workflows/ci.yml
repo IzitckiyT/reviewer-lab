@@ -50,6 +50,19 @@ jobs:
                       raise
                   time.sleep(1)
           assert state['read_only'] is True
+          examples = {case['id']: case.get('example_run') for case in state['cases']}
+          assert set(examples) == {
+              'owner', 'audit', 'snapshot', 'mb_firewall_whitelist',
+              'mb_firewall_policy', 'mb_sudo_bootstrap',
+              'mb_secret_diagnostics', 'mb_malware_chain',
+          }
+          assert all(example and example.get('verified') is True for example in examples.values())
+          history_examples = state['history_examples']
+          assert len(history_examples) == 4
+          assert {example['id'] for example in history_examples} == {
+              'role-collision', 'unstable-verdict', 'attacker-revision', 'external-health-file',
+          }
+          assert all(example.get('verified') is True for example in history_examples)
           request = urllib.request.Request(origin + '/api/start', data=b'{}', headers={
               'Content-Type': 'application/json', 'Origin': origin,
               'X-Lab-Token': state['token'],

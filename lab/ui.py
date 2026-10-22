@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from .cases import CASES, Case
 from .case_examples import CaseExamples
+from .history_examples import HistoryExamples
 from .oracle import evaluate
 from .scenario_trace import explain_scenario
 from .manual import check_source, load_series, validate_source
@@ -116,6 +117,7 @@ class Dashboard:
         self.provider_checks = {}
         self.provider_check_lock = threading.Lock()
         self.case_examples = CaseExamples(self.runs)
+        self.history_examples = HistoryExamples(self.runs)
 
     def cases(self):
         examples = self.case_examples.list()
@@ -493,6 +495,8 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                           "/task-library.css": ("task-library.css", "text/css; charset=utf-8"),
                           "/attack-story.js": ("attack-story.js", "text/javascript; charset=utf-8"),
                           "/attack-story.css": ("attack-story.css", "text/css; charset=utf-8"),
+                          "/history-examples.js": ("history-examples.js", "text/javascript; charset=utf-8"),
+                          "/history-examples.css": ("history-examples.css", "text/css; charset=utf-8"),
                           "/navigation.css": ("navigation.css", "text/css; charset=utf-8"),
                           "/style.css": ("style.css", "text/css; charset=utf-8"),
                           "/fonts.css": ("fonts.css", "text/css; charset=utf-8"),
@@ -511,6 +515,7 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                         "active": app.active(), "featured": FEATURED,
                         "example": read_json(app.root / "examples" / "successful-owner-evidence.json"),
                         "launch_candidate": read_text(app.root / "examples" / "successful-owner-bypass.py", 20_000),
+                        "history_examples": app.history_examples.list(),
                         "cases": app.cases()})
                 if path == "/api/providers":
                     return self.send(200, app.providers())

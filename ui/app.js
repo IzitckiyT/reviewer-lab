@@ -6,7 +6,7 @@ const json = v => JSON.stringify(v, null, 2);
 const pythonValue = v => v === true ? 'True' : v === false ? 'False' : JSON.stringify(v);
 const state = {data:null, view:'runs', run:null, runOpen:false, attempt:null, details:new Map(), demoRun:null,
   demoAttempt:null, stage:0, demoMode:'welcome', playing:false, timer:null, tab:'snippet', inspectorTab:'source', trace:null, runQuery:'', runFilter:'all', runCase:'all', runStatus:'all', runEffort:'all', filtersExpanded:false, attemptOpen:false, attemptQuery:'', attemptFilter:'all', attemptSort:'original', launchPending:false,
-  providerId:null,reviewerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,casePickerTask:null,exampleAttempt:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
+  providerId:null,reviewerModels:{},attackerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,casePickerTask:null,exampleAttempt:null,historyExample:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
 const replicationIds = ['replication-collision-low-2026-10-19','replication-collision-medium-2026-10-19'];
 let toastTimer, scenarioRequest = 0;
 function toast(message) { $('#toast').textContent=message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),4500); }
@@ -87,6 +87,46 @@ async function openTaskExample(runId,attemptId) {
   if(!(record.rows||[]).some(row=>row.id===attemptId&&row.case===task.id))return;
   resetAttemptBrowser();state.attempt=attemptId;state.exampleAttempt={runId,attemptId};state.attemptOpen=true;state.inspectorTab='diff';navigate('runs',runId);
 }
+function historyExamples() {return (Array.isArray(state.data?.history_examples)?state.data.history_examples:[]).filter(example=>example?.verified===true);}
+function historyExampleById(id) {return historyExamples().find(example=>example.id===id);}
+function selectedHistoryExample(d) {
+  const example=historyExampleById(state.historyExample?.id);
+  if(!example||example.run_id!==d?.id||state.historyExample.runId!==d.id)return null;
+  const row=d.rows?.find(item=>item.id===example.attempt_id&&item.case===example.case);
+  return row&&row.source_sha256===example.source_sha256?example:null;
+}
+function historyExampleMarkup(d) {const example=selectedHistoryExample(d);return example&&globalThis.LabHistoryExamples?LabHistoryExamples.detail(example):'';}
+function historyStoryOptions(d) {return {attemptId:state.exampleAttempt?.runId===d.id?state.exampleAttempt.attemptId:undefined,collapseVersions:!!selectedHistoryExample(d)&&!state.historyExample.diffOpen};}
+function selectHistoryExample(example) {
+  resetAttemptBrowser();state.historyExample={id:example.id,runId:example.run_id,diffOpen:false};
+  state.attempt=example.attempt_id;state.exampleAttempt={runId:example.run_id,attemptId:example.attempt_id};
+  state.attemptOpen=false;state.runFilter='examples';state.inspectorTab='diff';
+}
+async function openHistoryExample(id) {
+  const example=historyExampleById(id);if(!example)return;
+  const origin=location.hash,view=state.view;
+  const record=await detail(example.run_id);
+  if(location.hash!==origin||state.view!==view)return;
+  const current=historyExampleById(id);
+  if(!current||['run_id','attempt_id','case','source_sha256','scenario_index'].some(key=>current[key]!==example[key])||JSON.stringify(current.witness)!==JSON.stringify(example.witness))return;
+  const row=record.rows?.find(item=>item.id===example.attempt_id&&item.case===example.case);
+  if(!row||row.source_sha256!==example.source_sha256)return;
+  selectHistoryExample(example);navigate('runs',example.run_id);
+}
+async function showHistoryScenario(id) {
+  const d=state.details.get(state.run),example=selectedHistoryExample(d);
+  if(!example||example.id!==id||state.view!=='runs'||!state.runOpen)return;
+  const item=d.rows.find(row=>row.id===example.attempt_id)?.oracle?.rows?.[example.scenario_index];
+  if(!item||JSON.stringify(item.input)!==JSON.stringify(example.witness?.input)||item.expected!==example.witness.expected||item.actual!==example.witness.actual)return;
+  const opener=document.activeElement;
+  await openScenario({dataset:{scenarioRun:example.run_id,scenarioAttempt:example.attempt_id,scenarioCase:example.case,scenarioIndex:String(example.scenario_index)},focus:()=>opener?.focus?.(),get isConnected(){return opener?.isConnected;}});
+}
+function showHistoryDiff(id) {
+  const d=state.details.get(state.run),example=selectedHistoryExample(d);
+  if(!example||example.id!==id||state.view!=='runs'||!state.runOpen)return;
+  state.historyExample.diffOpen=true;state.attempt=example.attempt_id;renderRuns();
+  $('.attack-story-iteration[open]')?.scrollIntoView?.({behavior:'smooth',block:'start'});
+}
 function closeCasePicker() {const context=state.casePicker;state.casePicker=null;state.casePickerTask=null;$('#case-dialog').close();if(context)$('#'+context+'-case-button')?.focus();}
 function selectCase(context,id) {
   if(!state.data.cases.some(c=>c.id===id)||state.launchPending)return;
@@ -128,14 +168,16 @@ function selectedProvider() {return providerById(state.providerId||state.data.se
 function defaultModel(provider,role) {
   const value=provider?.default_models?.[role];return Array.isArray(value)?value[0]:value||'';
 }
-function reviewerModels(provider) {
+function reviewerModels(provider,role='reviewer') {
   const values=(provider.models||[]).map(m=>typeof m==='string'?m:m.id||m.name).filter(Boolean);
-  return [...new Set([defaultModel(provider,'reviewer'),...values].filter(Boolean))];
+  return [...new Set([defaultModel(provider,role),...values].filter(Boolean))];
 }
 function reviewerValue(provider=selectedProvider()) {return state.reviewerModels[provider.id]||defaultModel(provider,'reviewer');}
-function modelPickerMarkup(context,provider=selectedProvider()) {
-  const prefix=context==='manual'?'manual-reviewer-model':'reviewer-model',value=reviewerValue(provider),models=reviewerModels(provider),custom=!models.includes(value);
-  return `<div class="form-field reviewer-model-picker"><label for="${prefix}">Модель ревьюера</label><select id="${prefix}" name="reviewer_model">${models.map(model=>`<option value="${esc(model)}" ${!custom&&model===value?'selected':''}>${esc(model)}</option>`).join('')}<option value="__custom__" ${custom?'selected':''}>Другая модель…</option></select><input id="${prefix}-custom" name="reviewer_model_custom" value="${esc(custom?value:'')}" placeholder="ID модели" aria-label="ID модели ревьюера" autocomplete="off" ${custom?'':'hidden'}>${provider.models_note?`<details class="model-catalog-info"><summary>О списке моделей</summary><p class="model-catalog-note">${esc(provider.models_note)}</p></details>`:''}</div>`;
+function attackerValue(provider=selectedProvider()) {return state.attackerModels[provider.id]||defaultModel(provider,'attacker');}
+function modelPickerMarkup(context,provider=selectedProvider(),role='reviewer') {
+  const attacker=role==='attacker',label=attacker?'атакующего':'ревьюера';
+  const prefix=attacker?'attacker-model':context==='manual'?'manual-reviewer-model':'reviewer-model',value=attacker?attackerValue(provider):reviewerValue(provider),models=reviewerModels(provider,role),custom=!models.includes(value);
+  return `<div class="form-field reviewer-model-picker"><label for="${prefix}">Модель ${label}</label><select id="${prefix}" name="${role}_model">${models.map(model=>`<option value="${esc(model)}" ${!custom&&model===value?'selected':''}>${esc(model)}</option>`).join('')}<option value="__custom__" ${custom?'selected':''}>Другая модель…</option></select><input id="${prefix}-custom" name="${role}_model_custom" value="${esc(custom?value:'')}" placeholder="ID модели" aria-label="ID модели ${label}" autocomplete="off" ${custom?'':'hidden'}>${!attacker&&provider.models_note?`<details class="model-catalog-info"><summary>О списке моделей</summary><p class="model-catalog-note">${esc(provider.models_note)}</p></details>`:''}</div>`;
 }
 function chosenReviewer(context='launch') {
   const manual=context==='manual',f=manual?null:$('#launch-form'),prefix=manual?'manual-reviewer-model':'reviewer-model';
@@ -160,6 +202,24 @@ function resetReviewerPicker(context) {
   if(f?.elements?.reviewer_model_custom)f.elements.reviewer_model_custom.value=choice==='__custom__'?value:'';
   if(context==='manual'){state.manual.reviewerModel=value;if($('#manual-model-summary'))$('#manual-model-summary').textContent='Ревьюер · '+value;}
 }
+function chosenAttacker() {
+  const f=$('#launch-form'),value=f?.elements?.attacker_model?.value??attackerValue();
+  return value==='__custom__'?(f?.elements?.attacker_model_custom?.value||'').trim():value.trim();
+}
+function updateAttackerChoice(value=null) {
+  const selector=$('#attacker-model'),custom=$('#attacker-model-custom');
+  if(value!==null&&selector)selector.value=value;
+  const chosen=chosenAttacker();if(chosen)state.attackerModels[selectedProvider().id]=chosen;
+  if(custom){custom.hidden=selector?.value!=='__custom__';custom.required=!custom.hidden;}
+}
+function resetAttackerPicker() {
+  const p=selectedProvider(),value=attackerValue(p),slot=$('#attacker-model-field');
+  if(slot)slot.innerHTML=modelPickerMarkup('launch',p,'attacker')+'<p class="small-note">Создаёт патчи с ошибкой и пытается провести их через ревью. Обе модели используют выбранное подключение.</p>';
+  const f=$('#launch-form'),choice=reviewerModels(p,'attacker').includes(value)?value:'__custom__';
+  if(f?.elements?.attacker_model)f.elements.attacker_model.value=choice;
+  if(f?.elements?.attacker_model_custom)f.elements.attacker_model_custom.value=choice==='__custom__'?value:'';
+}
+
 function pinnedProvider(d) {
   const value=d?.manifest?.provider;return typeof value==='string'?value:value?.id||d?.manifest?.provider_config?.provider||'codex';
 }
@@ -181,6 +241,7 @@ async function refreshProviders() {
     for(const context of ['launch','manual'])if($('#'+context+'-provider-status')) {
       $('#'+context+'-provider-status').innerHTML=providerStatusMarkup(selectedProvider());
       if(context==='launch'||!state.manual.runId)resetReviewerPicker(context);
+      if(context==='launch')resetAttackerPicker();
     }
     if(state.view==='launch')updateForm();else updateManualControls();
   } finally {
@@ -202,7 +263,7 @@ function navigate(view,runId=null) {
     saveManualDraft();state.manual={caseId:'owner',source:null,runId,selected:null,pending:false,error:'',loadedRun:null};restoreManualDraft(runId);
   }
   if(runId&&view==='runs')state.run=runId;
-  location.hash=state.runOpen?'runs/'+encodeURIComponent(runId):view==='tasks'&&runId?'tasks/'+encodeURIComponent(runId):view==='manual'&&state.manual.runId?'manual/'+encodeURIComponent(state.manual.runId):view;
+  location.hash=state.runOpen?(state.historyExample?.runId===runId?'runs/examples/'+encodeURIComponent(state.historyExample.id):'runs/'+encodeURIComponent(runId)):view==='runs'&&state.runFilter==='examples'?'runs/examples':view==='tasks'&&runId?'tasks/'+encodeURIComponent(runId):view==='manual'&&state.manual.runId?'manual/'+encodeURIComponent(state.manual.runId):view;
   document.querySelectorAll('.rail-nav .nav-button').forEach(b=>{const active=b.dataset.view===view;b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
   $('#breadcrumb').textContent={demo:'Демонстрация',runs:'История экспериментов',launch:'Новый запуск',manual:'Свой код',tasks:'Задачи'}[view];
   render();
@@ -211,6 +272,11 @@ function navigate(view,runId=null) {
 function currentRoute() {
   const [view,...parts]=location.hash.slice(1).split('/');
   if(!view)return {view:'demo',runId:null};
+  if(view==='runs'&&parts[0]==='examples') {
+    let exampleId=null;try{if(parts.length===2)exampleId=decodeURIComponent(parts[1]);}catch{}
+    const example=historyExampleById(exampleId);
+    return {view:'runs',runId:example?.run_id||null,examples:true,historyExampleId:example?.id||null};
+  }
   let runId=null;
   try{if(['runs','manual'].includes(view)&&parts.length)runId=decodeURIComponent(parts.join('/'));}catch{}
   let taskId=null;try{if(view==='tasks'&&parts.length)taskId=decodeURIComponent(parts.join('/'));}catch{}
@@ -426,16 +492,19 @@ function runTableRows() {
   }).join('')||'<div class="empty filter-empty"><h2>Ничего не найдено</h2><p>Попробуйте изменить запрос или сбросить фильтры.</p><button class="text-button" data-action="reset-filters">Сбросить фильтры</button></div>';
 }
 function runsTabs() {
-  return `<nav class="workspace-tabs" aria-label="Просмотр экспериментов"><button class="workspace-tab ${state.runFilter==='all'?'active':''}" data-filter="all" aria-pressed="${state.runFilter==='all'}">Все эксперименты</button><button class="workspace-tab ${state.runFilter==='missed'?'active':''}" data-filter="missed" aria-pressed="${state.runFilter==='missed'}">С пропусками</button><button class="workspace-tab" data-view="demo">Разбор примера</button></nav>`;
+  return `<nav class="workspace-tabs" aria-label="Просмотр экспериментов">${historyExamples().length||state.runFilter==='examples'?`<button class="workspace-tab ${state.runFilter==='examples'?'active':''}" data-filter="examples" aria-pressed="${state.runFilter==='examples'}">Показательные примеры</button>`:''}<button class="workspace-tab ${state.runFilter==='all'?'active':''}" data-filter="all" aria-pressed="${state.runFilter==='all'}">Все эксперименты</button><button class="workspace-tab ${state.runFilter==='missed'?'active':''}" data-filter="missed" aria-pressed="${state.runFilter==='missed'}">С пропусками</button>${historyExamples().length?'':'<button class="workspace-tab" data-view="demo">Разбор примера</button>'}</nav>`;
 }
 function filterSelect(id,label,selected,options) {
   return `<label class="filter-field" for="${id}"><span>${label}</span><select id="${id}" aria-label="${esc(label)}">${options.map(([value,text])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(text)}</option>`).join('')}</select></label>`;
 }
 function renderRunList() {
+  if(state.runFilter==='examples') {
+    $('#main').innerHTML=`<div class="page-head"><h1>История экспериментов</h1></div>${runsTabs()}<div id="active-slot">${liveBanner()}</div><div id="history-examples-slot">${LabHistoryExamples.render(historyExamples())}</div>`;return;
+  }
   const focused=document.activeElement?.id==='run-search';
   const cursor=focused?document.activeElement.selectionStart:0;
   const efforts=[...new Set(state.data.runs.map(r=>r.manifest.models.reviewer[1]))];
-  $('#main').innerHTML=`<div class="runs-context"><span class="info-mark" aria-hidden="true">i</span><span>Как AI-ревьюер пропускает ошибку в коде</span><button class="text-button" data-view="demo">Разобрать пример →</button></div><div class="page-head"><h1>Эксперименты</h1></div>${runsTabs()}<div id="active-slot">${liveBanner()}</div><div class="runs-layout"><section class="runs-browser" aria-label="Сохранённые запуски"><div class="run-list-header" aria-hidden="true"><span id="filtered-count">Эксперименты · ${visibleRuns().length}</span><span>Правило</span><span>Ревьюер</span><span>Пропуски</span><span>Статус</span></div><div id="run-table-body">${runTableRows()}</div><p class="runs-footnote">Пропуск: код нарушает правило, но модель его одобрила. Контрольные проверки считаются отдельно.</p></section><aside class="filter-panel ${state.filtersExpanded?'expanded':''}" aria-label="Фильтры экспериментов"><div class="filter-heading"><h2>Фильтры</h2><button class="filters-toggle" data-action="toggle-filters" aria-expanded="${state.filtersExpanded}" aria-controls="filter-controls">Фильтры</button><button class="text-button" data-action="reset-filters">Сбросить</button></div><div class="filter-controls" id="filter-controls"><label class="filter-field" for="run-search"><span>Поиск</span><input id="run-search" type="search" placeholder="Название или ID" value="${esc(state.runQuery)}" aria-label="Найти эксперимент"></label>${filterSelect('run-case','Правило',state.runCase,[['all','Все правила'],...state.data.cases.map(c=>[c.id,c.title])])}${filterSelect('run-status','Статус',state.runStatus,[['all','Все статусы'],...Object.entries(statuses)])}${filterSelect('run-effort','Рассуждение ревьюера',state.runEffort,[['all','Любой уровень'],...efforts.map(e=>[e,e==='low'?'Low':e==='medium'?'Medium':e])])}</div></aside></div>`;
+  $('#main').innerHTML=`<div class="runs-context"><span class="info-mark" aria-hidden="true">i</span><span>${historyExamples().length?'Разборы экспериментов: код, действия атакующего и решение модели':'Как AI-ревьюер пропускает ошибку в коде'}</span>${historyExamples().length?'<button class="text-button" data-filter="examples">Открыть примеры →</button>':'<button class="text-button" data-view="demo">Разобрать пример →</button>'}</div><div class="page-head"><h1>Эксперименты</h1></div>${runsTabs()}<div id="active-slot">${liveBanner()}</div><div class="runs-layout"><section class="runs-browser" aria-label="Сохранённые запуски"><div class="run-list-header" aria-hidden="true"><span id="filtered-count">Эксперименты · ${visibleRuns().length}</span><span>Правило</span><span>Ревьюер</span><span>Пропуски</span><span>Статус</span></div><div id="run-table-body">${runTableRows()}</div><p class="runs-footnote">Пропуск: код нарушает правило, но модель его одобрила. Контрольные проверки считаются отдельно.</p></section><aside class="filter-panel ${state.filtersExpanded?'expanded':''}" aria-label="Фильтры экспериментов"><div class="filter-heading"><h2>Фильтры</h2><button class="filters-toggle" data-action="toggle-filters" aria-expanded="${state.filtersExpanded}" aria-controls="filter-controls">Фильтры</button><button class="text-button" data-action="reset-filters">Сбросить</button></div><div class="filter-controls" id="filter-controls"><label class="filter-field" for="run-search"><span>Поиск</span><input id="run-search" type="search" placeholder="Название или ID" value="${esc(state.runQuery)}" aria-label="Найти эксперимент"></label>${filterSelect('run-case','Правило',state.runCase,[['all','Все правила'],...state.data.cases.map(c=>[c.id,c.title])])}${filterSelect('run-status','Статус',state.runStatus,[['all','Все статусы'],...Object.entries(statuses)])}${filterSelect('run-effort','Рассуждение ревьюера',state.runEffort,[['all','Любой уровень'],...efforts.map(e=>[e,e==='low'?'Low':e==='medium'?'Medium':e])])}</div></aside></div>`;
   if(focused){$('#run-search').focus();$('#run-search').setSelectionRange(cursor,cursor);}
 }
 function attemptCategory(row) {
@@ -455,7 +524,7 @@ function visibleAttempts(d) {
   return state.attemptSort==='newest'?rows.reverse():rows;
 }
 function resetAttemptBrowser() {
-  state.exampleAttempt=null;
+  state.exampleAttempt=null;state.historyExample=null;
   state.attempt=null;state.attemptOpen=false;state.attemptQuery='';state.attemptFilter='all';state.attemptSort='original';state.inspectorTab='source';
 }
 function attemptRecords(d) {
@@ -516,12 +585,12 @@ function runSummaryLine(d) {
 function isSimpleRun(d) {return globalThis.LabRunStory?.supports(d)||false;}
 function renderSimpleRun(d) {
   const row=LabRunStory.mainRow(d);if(row)state.attempt=row.id;
-  $('#main').innerHTML=`<div class="run-detail-page simple-run-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${state.data.active.running&&state.data.active.id===d.id?liveBanner():''}</div><div id="run-story-body">${LabRunStory.render(d,{attemptId:state.exampleAttempt?.runId===d.id?state.exampleAttempt.attemptId:undefined})}</div><div id="run-story-extras">${simpleRunExtras(d)}</div></div>`;
+  $('#main').innerHTML=`<div class="run-detail-page simple-run-page"><button class="text-button back-to-runs" data-action="close-run">← ${state.runFilter==="examples"?"Показательные примеры":"Все эксперименты"}</button><div id="history-example-slot">${historyExampleMarkup(d)}</div><div id="active-slot">${state.data.active.running&&state.data.active.id===d.id?liveBanner():''}</div><div id="run-story-body">${LabRunStory.render(d,historyStoryOptions(d))}</div><div id="run-story-extras">${simpleRunExtras(d)}</div></div>`;
 }
 function simpleRunExtras(d) {
   return `${d.summary?`<details class="run-details"><summary>Время и расход</summary><p class="small-note">Время · ${elapsedLabel(d.manifest.created_at,d.manifest.finished_at||Date.now())}</p>${runMetrics(d)}</details>`:''}${runCallDetails(d)}`;
 }
-function attackStory(d) {return globalThis.LabAttackStory?.render(d,{attemptId:state.attempt})||'';}
+function attackStory(d) {return globalThis.LabAttackStory?.render(d,{...historyStoryOptions(d),attemptId:state.attempt})||'';}
 function preserveAttackStory(node,markup) {
   if(!node||node.innerHTML===markup)return;
   const key=el=>el.dataset?.attackKey||'summary:'+el.querySelector('summary')?.textContent;
@@ -538,7 +607,7 @@ function winningMechanism(d) {
 }
 function refreshSimpleRun(d) {
   const row=LabRunStory.mainRow(d);if(row)state.attempt=row.id;
-  const node=$('#run-story-body'),markup=LabRunStory.render(d,{attemptId:state.exampleAttempt?.runId===d.id?state.exampleAttempt.attemptId:undefined});
+  const node=$('#run-story-body'),markup=LabRunStory.render(d,historyStoryOptions(d));
   if(!node)return renderSimpleRun(d);
   if(node.innerHTML!==markup) {
     const opened=Array.from(node.querySelectorAll?.('details[open]')||[]).map(el=>el.querySelector('summary')?.textContent);
@@ -549,11 +618,13 @@ function refreshSimpleRun(d) {
   }
   $('#active-slot').innerHTML=state.data.active.running&&state.data.active.id===d.id?liveBanner():'';
   preserveDisclosures($('#run-story-extras'),simpleRunExtras(d));
+  preserveDisclosures($('#history-example-slot'),historyExampleMarkup(d));
 }
 function refreshRunView() {
   const d=state.details.get(state.run);if(isSimpleRun(d)&&$('#run-story-body'))return refreshSimpleRun(d);
   if(!d?.manifest||d.pending||!$('#attempt-records'))return renderRuns();
   const m=d.manifest,status=effectiveRunStatus(d);
+  preserveDisclosures($('#history-example-slot'),historyExampleMarkup(d));
   $('#active-slot').innerHTML=liveBanner();renderAttemptRecords();
   $('#run-meta-status').innerHTML=pill(statuses[status]||status,status==='completed'?'teal':status==='running'?'blue':status==='failed'?'red':'');
   $('#run-meta-end').textContent=m.finished_at?runDate(m.finished_at):'—';
@@ -571,14 +642,14 @@ function renderRuns() {
   const focused=document.activeElement?.id==='attempt-search';
   const cursor=focused?document.activeElement.selectionStart:0;
   const d=state.details.get(state.run);
-  if(!d||d.pending){$('#main').innerHTML=`<div class="run-detail-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${liveBanner()}</div><div class="empty">Готовим данные эксперимента…</div></div>`;return;}
+  if(!d||d.pending){$('#main').innerHTML=`<div class="run-detail-page"><button class="text-button back-to-runs" data-action="close-run">← ${state.runFilter==="examples"?"Показательные примеры":"Все эксперименты"}</button><div id="active-slot">${liveBanner()}</div><div class="empty">Готовим данные эксперимента…</div></div>`;return;}
   if(isSimpleRun(d))return renderSimpleRun(d);
   const m=d.manifest,status=effectiveRunStatus(d),rows=d.rows||[],attempts=rows.filter(r=>r.stage==='search'),controls=rows.filter(r=>r.stage==='control');
   const misses=attempts.filter(r=>r.success).length;
   const names=(m.cases||[]).map(id=>d.cases?.find(c=>c.id===id)?.title||id).join(', ');
   const model=m=>m?`${esc(m[0].replace('gpt-5.6-luna','Luna 5.6').replace('gpt-6.1-sol','Sol 6.1'))}<small>${esc(m[1])}</small>`:'—';
   const meta=[['Создан',esc(runDate(m.created_at))],['Окончание',m.finished_at?esc(runDate(m.finished_at)):'—'],['Правило',esc(names)],['Атакующий',m.experiment_kind==='manual'?'Вы':m.experiment_kind==='candidate_screen'?'Не вызывался':model(m.models?.attacker)],['Ревьюер',model(m.models?.reviewer)],['Статус',pill(statuses[status]||status,status==='completed'?'teal':status==='running'?'blue':status==='failed'?'red':'')]];
-  $('#main').innerHTML=`<div class="run-detail-page"><button class="text-button back-to-runs" data-action="close-run">← Все эксперименты</button><div id="active-slot">${liveBanner()}</div><section class="experiment-detail"><header class="experiment-overview"><div class="experiment-title-row"><h1>${esc(LABELS(d.id))}</h1><span class="experiment-kind">${m.experiment_kind==='manual'?'Ручная серия':m.experiment_kind==='candidate_screen'?'Проверка готового кандидата':'Генерация атак'}</span></div><details class="run-config-details"><summary>Настройки запуска</summary><p class="experiment-id">${esc(d.id)}</p><dl class="experiment-meta">${meta.map(([label,value])=>`<div class="experiment-meta-item"><dt>${label}</dt><dd${label==='Статус'?' id="run-meta-status"':label==='Окончание'?' id="run-meta-end"':''}>${value}</dd></div>`).join('')}</dl><div class="experiment-summary-line" id="run-summary-line"><span>Попытки <b>${attempts.length}</b></span><span>Контроли <b>${controls.length}</b></span><span>Пропуски <b class="${misses?'text-danger':''}">${misses}</b></span><span>Время по Москве</span></div></details><p class="callout" id="run-status-note" ${status==='completed'?'hidden':''}>Незавершённый запуск. Результаты могут быть неполными.</p></header><div id="attack-story-slot">${attackStory(d)}${winningMechanism(d)}</div><details class="run-attempt-browser"><summary>Таблица попыток и проверочных примеров · ${rows.length}</summary><section class="experiment-attempts" aria-label="Попытки эксперимента"><div class="attempts-section-heading"><h2>Попытки и контроли</h2><span id="attempt-count">${visibleAttempts(d).length} из ${rows.length}</span></div><div class="attempt-toolbar"><input type="search" id="attempt-search" aria-label="Найти попытку" placeholder="Поиск по попытке, правилу или ID" value="${esc(state.attemptQuery)}"><select id="attempt-result" aria-label="Результат попытки">${[['all','Все результаты'],['missed','Нарушение пропущено'],['blocked','Патч отклонён'],['accepted','Безопасный патч принят'],['false_block','Ложная блокировка'],['other','Ошибки и без решения'],['control','Контрольные проверки']].map(([id,label])=>`<option value="${id}" ${state.attemptFilter===id?'selected':''}>${label}</option>`).join('')}</select><select id="attempt-sort" aria-label="Порядок попыток"><option value="original" ${state.attemptSort==='original'?'selected':''}>По порядку выполнения ↑</option><option value="newest" ${state.attemptSort==='newest'?'selected':''}>Сначала последние ↓</option></select></div><div id="attempt-records">${attemptRecords(d)}</div></section></details></section>${d.summary?`<details class="run-details" id="run-statistics"><summary>Статистика и расход</summary>${runMetrics(d)}</details>`:''}<div id="run-call-details">${runCallDetails(d)}</div></div>`;
+  $('#main').innerHTML=`<div class="run-detail-page"><button class="text-button back-to-runs" data-action="close-run">← ${state.runFilter==="examples"?"Показательные примеры":"Все эксперименты"}</button><div id="history-example-slot">${historyExampleMarkup(d)}</div><div id="active-slot">${liveBanner()}</div><section class="experiment-detail"><header class="experiment-overview"><div class="experiment-title-row"><h1>${esc(LABELS(d.id))}</h1><span class="experiment-kind">${m.experiment_kind==='manual'?'Ручная серия':m.experiment_kind==='candidate_screen'?'Проверка готового кандидата':'Генерация атак'}</span></div><details class="run-config-details"><summary>Настройки запуска</summary><p class="experiment-id">${esc(d.id)}</p><dl class="experiment-meta">${meta.map(([label,value])=>`<div class="experiment-meta-item"><dt>${label}</dt><dd${label==='Статус'?' id="run-meta-status"':label==='Окончание'?' id="run-meta-end"':''}>${value}</dd></div>`).join('')}</dl><div class="experiment-summary-line" id="run-summary-line"><span>Попытки <b>${attempts.length}</b></span><span>Контроли <b>${controls.length}</b></span><span>Пропуски <b class="${misses?'text-danger':''}">${misses}</b></span><span>Время по Москве</span></div></details><p class="callout" id="run-status-note" ${status==='completed'?'hidden':''}>Незавершённый запуск. Результаты могут быть неполными.</p></header><div id="attack-story-slot">${attackStory(d)}${winningMechanism(d)}</div><details class="run-attempt-browser"><summary>Таблица попыток и проверочных примеров · ${rows.length}</summary><section class="experiment-attempts" aria-label="Попытки эксперимента"><div class="attempts-section-heading"><h2>Попытки и контроли</h2><span id="attempt-count">${visibleAttempts(d).length} из ${rows.length}</span></div><div class="attempt-toolbar"><input type="search" id="attempt-search" aria-label="Найти попытку" placeholder="Поиск по попытке, правилу или ID" value="${esc(state.attemptQuery)}"><select id="attempt-result" aria-label="Результат попытки">${[['all','Все результаты'],['missed','Нарушение пропущено'],['blocked','Патч отклонён'],['accepted','Безопасный патч принят'],['false_block','Ложная блокировка'],['other','Ошибки и без решения'],['control','Контрольные проверки']].map(([id,label])=>`<option value="${id}" ${state.attemptFilter===id?'selected':''}>${label}</option>`).join('')}</select><select id="attempt-sort" aria-label="Порядок попыток"><option value="original" ${state.attemptSort==='original'?'selected':''}>По порядку выполнения ↑</option><option value="newest" ${state.attemptSort==='newest'?'selected':''}>Сначала последние ↓</option></select></div><div id="attempt-records">${attemptRecords(d)}</div></section></details></section>${d.summary?`<details class="run-details" id="run-statistics"><summary>Статистика и расход</summary>${runMetrics(d)}</details>`:''}<div id="run-call-details">${runCallDetails(d)}</div></div>`;
   if(focused){$('#attempt-search').focus();$('#attempt-search').setSelectionRange(cursor,cursor);}
 }
 function runDisplayLabel(r) {return r.label&&r.label!==r.id?r.label:r.manifest?.cases?.length===1?`${caseTitle(r.manifest.cases[0])} · ${r.manifest.experiment_kind==='candidate_screen'?'готовый пример':r.manifest.experiment_kind==='manual'?'свой код':'поиск ошибки'}`:r.id;}
@@ -783,11 +854,11 @@ function launchPlan(preset,n,r,effort,caseId,models={}) {
 }
 function saveLaunchDraft() {
   const f=$('#launch-form');if(!f?.elements)return;
-  state.launchDraft=Object.fromEntries(['preset','case','attacker_model','effort','attempts','repeats'].filter(key=>f.elements[key]).map(key=>[key,f.elements[key].value]));
+  state.launchDraft=Object.fromEntries(['preset','case','attacker_model','attacker_model_custom','effort','attempts','repeats'].filter(key=>f.elements[key]).map(key=>[key,f.elements[key].value]));
 }
 function renderLaunch() {
   const p=selectedProvider();
-  $('#main').innerHTML=`<section class="launch-page"><div class="page-head"><div><h1>Новая проверка</h1><p class="subtitle" id="launch-subtitle">В готовом коде есть ошибка. Посмотрим, одобрит ли его модель.</p></div></div><div id="active-slot">${liveBanner()}</div><div class="launch-layout"><form id="launch-form" class="launch-settings"><div class="form-field" id="case-field">${caseChoiceMarkup('launch',state.launchCase)}</div><div id="case-provenance"></div><div class="launch-model-row">${providerMarkup('launch')}<div id="launch-model-picker">${modelPickerMarkup('launch',p)}</div></div><details class="launch-source"><summary id="launch-source-label">Посмотреть код</summary><div id="launch-source-code"></div></details><details class="launch-advanced"><summary>Режим и дополнительные настройки</summary><div class="form-field"><label for="preset">Режим проверки</label><select id="preset" name="preset"><option value="screen">Готовый патч с ошибкой</option><option value="feedback">Найти новый обход</option><option value="compare">Сравнить два способа поиска</option></select><p id="preset-note" hidden></p></div><div class="form-field" id="attacker-model-field"><label for="attacker-model">Модель генератора</label><input id="attacker-model" name="attacker_model" value="${esc(defaultModel(p,'attacker'))}" autocomplete="off"></div><div class="form-field" id="effort-field"><label for="effort">Уровень рассуждения Codex</label><select id="effort" name="effort"><option value="medium">Medium</option><option value="low">Low</option></select></div><div class="form-split"><div class="form-field" id="attempts-field"><label for="attempts">Новых патчей в серии</label><select id="attempts" name="attempts">${[1,2,3,4].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div><div class="form-field"><label for="repeats" id="repeats-label">Сколько раз проверить патч</label><select id="repeats" name="repeats"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option></select></div></div><p>Один вызов — до 10 минут. Лимит запуска — 300 000 известных токенов.</p></details><button class="text-button launch-manual-link" type="button" data-view="manual">Хочу вставить свой патч →</button></form><aside class="launch-preview" aria-label="План запуска"><h2>Что получите</h2><p id="launch-model-summary" class="launch-model-summary"></p><div id="launch-plan" aria-live="polite"></div><small id="budget-note" hidden></small><div id="launch-error"></div><div class="launch-submit"><p class="launch-cost">До <strong id="call-budget">3</strong> вызовов модели. Расходуется квота или баланс вашего провайдера.</p><button type="submit" form="launch-form" class="button primary" id="start-button" ${state.data.active.running?'disabled':''}>Запустить проверку</button></div></aside></div></section>`;
+  $('#main').innerHTML=`<section class="launch-page"><div class="page-head"><div><h1>Новая проверка</h1><p class="subtitle" id="launch-subtitle">В готовом коде есть ошибка. Посмотрим, одобрит ли его модель.</p></div></div><div id="active-slot">${liveBanner()}</div><div class="launch-layout"><form id="launch-form" class="launch-settings"><div class="form-field" id="case-field">${caseChoiceMarkup('launch',state.launchCase)}</div><div id="case-provenance"></div><div class="form-field"><label for="preset">Режим проверки</label><select id="preset" name="preset"><option value="screen">Готовый патч с ошибкой</option><option value="feedback">Найти новый обход</option><option value="compare">Сравнить два способа поиска</option></select><p id="preset-note" hidden></p></div><div class="launch-model-row">${providerMarkup('launch')}<div id="launch-model-picker">${modelPickerMarkup('launch',p)}</div></div><div id="attacker-model-field" hidden>${modelPickerMarkup('launch',p,'attacker')}<p class="small-note">Создаёт патчи с ошибкой и пытается провести их через ревью. Обе модели используют выбранное подключение.</p></div><details class="launch-source"><summary id="launch-source-label">Посмотреть код</summary><div id="launch-source-code"></div></details><details class="launch-advanced"><summary>Лимиты и повторы</summary><div class="form-field" id="effort-field"><label for="effort">Уровень рассуждения Codex</label><select id="effort" name="effort"><option value="medium">Medium</option><option value="low">Low</option></select></div><div class="form-split"><div class="form-field" id="attempts-field"><label for="attempts">Новых патчей в серии</label><select id="attempts" name="attempts">${[1,2,3,4].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></div><div class="form-field"><label for="repeats" id="repeats-label">Сколько раз проверить патч</label><select id="repeats" name="repeats"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option></select></div></div><p>Один вызов — до 10 минут. Лимит запуска — 300 000 известных токенов.</p></details><button class="text-button launch-manual-link" type="button" data-view="manual">Хочу вставить свой патч →</button></form><aside class="launch-preview" aria-label="План запуска"><h2>Что получите</h2><p id="launch-model-summary" class="launch-model-summary"></p><div id="launch-plan" aria-live="polite"></div><small id="budget-note" hidden></small><div id="launch-error"></div><div class="launch-submit"><p class="launch-cost">До <strong id="call-budget">3</strong> вызовов модели. Расходуется квота или баланс вашего провайдера.</p><button type="submit" form="launch-form" class="button primary" id="start-button" ${state.data.active.running?'disabled':''}>Запустить проверку</button></div></aside></div></section>`;
   const f=$('#launch-form');
   if(state.launchDraft&&f?.elements)for(const [key,value] of Object.entries(state.launchDraft))if(f.elements[key])f.elements[key].value=value;
   updateForm();
@@ -797,12 +868,12 @@ function updateForm(changed='') {
   const p=selectedProvider(),preset=f.elements.preset.value;
   $('#launch-subtitle').textContent=preset==='screen'?'В готовом коде есть ошибка. Посмотрим, одобрит ли его модель.':preset==='feedback'?'Модель предложит патчи, а ревьюер попробует найти ошибку.':'Сравним поиск обхода с обратной связью и без неё.';
   if(changed==='preset') {f.elements.repeats.value='1';f.elements.attempts.value=preset==='feedback'?'2':preset==='compare'?'4':'1';}
-  if(changed==='provider'&&f.elements.attacker_model)f.elements.attacker_model.value=defaultModel(p,'attacker');
+  if(changed==='provider')resetAttackerPicker();
   f.elements.case.disabled=false;
   f.elements.attempts.disabled=preset!=='feedback';
   if(preset==='screen')f.elements.attempts.value='1'; if(preset==='compare')f.elements.attempts.value='4';
   const n=+f.elements.attempts.value,r=+f.elements.repeats.value;
-  const selectedReviewer=chosenReviewer(),reviewer=selectedReviewer||defaultModel(p,'reviewer'),attacker=f.elements.attacker_model?.value.trim()||defaultModel(p,'attacker');
+  const selectedReviewer=chosenReviewer(),reviewer=selectedReviewer||defaultModel(p,'reviewer'),attacker=chosenAttacker();
   const plan=launchPlan(preset,n,r,p.id==='codex'?(f.elements.effort?.value||'medium'):'по умолчанию',f.elements.case.value,{reviewer,attacker});
   $('#call-budget').textContent=plan.max;
   $('#budget-note').textContent=plan.budget;
@@ -814,17 +885,20 @@ function updateForm(changed='') {
   const detailsButton=$('#launch-case-details');if(detailsButton?.dataset)detailsButton.dataset.taskId=state.launchCase;
   $('#launch-case-button').disabled=state.launchPending;
   $('#attempts-field').hidden=preset!=='feedback';
-  $('#attacker-model-field').hidden=preset==='screen';$('#effort-field').hidden=p.id!=='codex';$('#case-field').hidden=false;
+  $('#attacker-model-field').hidden=preset==='screen';
+  if(f.elements.attacker_model)f.elements.attacker_model.disabled=preset==='screen'||state.launchPending;
+  if(f.elements.attacker_model_custom){f.elements.attacker_model_custom.disabled=preset==='screen'||state.launchPending;f.elements.attacker_model_custom.required=preset!=='screen'&&f.elements.attacker_model?.value==='__custom__';}
+  $('#effort-field').hidden=p.id!=='codex';$('#case-field').hidden=false;
   $('#repeats-label').textContent=preset==='screen'?'Сколько раз проверить патч':'Сколько раз повторить серию';
   const c=state.data.cases.find(c=>c.id===f.elements.case.value);
   $('#case-provenance').innerHTML='';
   const source=preset==='screen'?(c?.id==='owner'?state.data.launch_candidate:c?.seed):c?.original;
   $('#launch-source-label').textContent=preset==='screen'?(c?.id==='owner'?'Посмотреть код с ошибкой':'Посмотреть код с ошибкой'):'Посмотреть исходный код';
   $('#launch-source-code').innerHTML=source?codeView(source):'<p class="small-note">Код пока недоступен.</p>';
-  $('#launch-model-summary').textContent=`Ревьюер · ${selectedReviewer||'укажите ID модели'}${preset==='screen'?'':` · Генератор: ${attacker}`}`;
+  $('#launch-model-summary').textContent=`Ревьюер · ${selectedReviewer||'укажите ID модели'}${preset==='screen'?'':` · Атакующий: ${attacker||'укажите ID модели'}`}`;
   $('#launch-plan').innerHTML=`<p class="launch-result-copy">${preset==='screen'?'Модель прочитает код и решит: принять его или отклонить. Если одобрит код с ошибкой — ревьюер её пропустил.':preset==='feedback'?'Генератор предложит код с ошибкой. Проверим его поведение, затем попросим модель принять код или отклонить.':'Сравним, как часто модель одобряет ошибочный код при двух способах его создания.'}</p><p class="launch-result-note">Поведение кода проверяем без модели: сравниваем его решения с правилом. Ситуаций в этой задаче: ${c?.domains?.reduce((count,domain)=>count*domain.length,1)||'—'}.</p><details class="launch-controls-note"><summary>Почему до ${plan.max} вызовов?</summary><p>Ещё два примера проверяют самого ревьюера: правильный код и простая ошибка. Затем он оценивает выбранный код. Результаты сохраняются в истории.</p></details>`;
   $('#start-button').textContent=state.launchPending?'Запускаем…':preset==='screen'?'Запустить проверку':preset==='feedback'?'Начать поиск обхода':'Запустить сравнение';
-  $('#start-button').disabled=state.data.active.running||state.launchPending||!selectedReviewer||p.available===false||p.configured===false||state.data.live_available===false;
+  $('#start-button').disabled=state.data.active.running||state.launchPending||!selectedReviewer||preset!=='screen'&&!attacker||p.available===false||p.configured===false||state.data.live_available===false;
   if(f.elements.provider)f.elements.provider.disabled=state.launchPending;
   if(state.data.live_available===false)$('#launch-error').innerHTML='<div class="error-box">Запуск моделей доступен только на локальном сервере. Откройте проект на компьютере командой python3 run.py.</div>';
 }
@@ -882,7 +956,7 @@ document.addEventListener('click',async event=>{
     if(b.dataset.view){event.target.closest('.rail-help')?.removeAttribute?.('open');if(b.dataset.view==='demo')state.demoMode='welcome';navigate(b.dataset.view);return;}
     if(b.dataset.manualAttempt){selectManualAttempt(b.dataset.manualAttempt);return;}
     if(b.dataset.stage!==undefined){openGuideStage(Number(b.dataset.stage));return;}
-    if(b.dataset.filter){state.runFilter=b.dataset.filter;state.runOpen=false;renderRuns();return;}
+    if(['all','missed','examples'].includes(b.dataset.filter)){state.runFilter=b.dataset.filter;state.runOpen=false;resetAttemptBrowser();navigate('runs');return;}
     if(b.dataset.tab){if(state.view==='demo'){state.tab=b.dataset.tab;renderDemo();}else{state.inspectorTab=b.dataset.tab;renderAttemptRecords();}return;}
     if(b.dataset.run){
       const selected=b.dataset.run,manual=state.data.runs.find(r=>r.id===selected)?.manifest.experiment_kind==='manual';
@@ -908,6 +982,9 @@ document.addEventListener('click',async event=>{
     }
     else if(action==='use-task'){useTask(b.dataset.taskId,b.dataset.context);}
     else if(action==='open-task-example'){await openTaskExample(b.dataset.exampleRun,b.dataset.exampleAttempt);}
+    else if(action==='open-history-example'){await openHistoryExample(b.dataset.exampleId);}
+    else if(action==='history-example-scenario'){await showHistoryScenario(b.dataset.exampleId);}
+    else if(action==='history-example-diff'){showHistoryDiff(b.dataset.exampleId);}
     else if(action==='close-case-picker'){closeCasePicker();}
     else if(action==='refresh-providers'){await refreshProviders();}
     else if(action==='manual-local-check'){await submitManual(true);}
@@ -927,7 +1004,7 @@ document.addEventListener('click',async event=>{
     else if(action==='close-run'){navigate('runs');}
     else if(action==='reset-attempt-filters'){state.attemptQuery='';state.attemptFilter='all';state.attemptSort='original';renderRuns();}
     else if(action==='toggle-filters'){state.filtersExpanded=!state.filtersExpanded;renderRunList();$('.filters-toggle').focus();}
-    else if(action==='reset-filters'){state.runQuery='';state.runFilter='all';state.runCase='all';state.runStatus='all';state.runEffort='all';renderRuns();}
+    else if(action==='reset-filters'){state.runQuery='';state.runFilter='all';state.runCase='all';state.runStatus='all';state.runEffort='all';navigate('runs');}
     else if(action==='start-guide') {
       event.target.closest('.rail-help')?.removeAttribute?.('open');
       if(state.view!=='demo')navigate('demo');
@@ -948,12 +1025,14 @@ document.addEventListener('click',async event=>{
 });
 document.addEventListener('keydown',event=>{if(event.key==='Escape')$('.rail-help')?.removeAttribute?.('open');});
 document.addEventListener('input',e=>{
+  if(e.target.id==='attacker-model-custom'){updateAttackerChoice();updateForm();}
   if(['reviewer-model-custom','manual-reviewer-model-custom'].includes(e.target.id)){const context=e.target.id.startsWith('manual')?'manual':'launch';updateReviewerChoice(context);if(context==='launch')updateForm();else updateManualControls();}
   if(e.target.id==='manual-source'){state.manual.source=e.target.value;saveManualDraft();updateManualControls();}
   if(e.target.id==='run-search'){state.runQuery=e.target.value;$('#run-table-body').innerHTML=runTableRows();$('#filtered-count').textContent='Эксперименты · '+visibleRuns().length;}
   if(e.target.id==='attempt-search'){state.attemptQuery=e.target.value;renderAttemptRecords();}
 });
 document.addEventListener('change',e=>{
+  if(e.target.id==='attacker-model'){updateAttackerChoice(e.target.value);updateForm();return;}
   if(['reviewer-model','manual-reviewer-model'].includes(e.target.id)){
     const context=e.target.id.startsWith('manual')?'manual':'launch';
     if(context==='manual'&&state.manual.runId)return;
@@ -983,7 +1062,8 @@ document.addEventListener('submit',async e=>{
   if(e.target.id==='manual-form'){e.preventDefault();await submitManual();return;}
   if(e.target.id!=='launch-form')return; e.preventDefault();if(state.launchPending||state.data.active.running||state.data.live_available===false)return;const f=e.target;
   if(!chosenReviewer()){$('#launch-error').innerHTML='<div class="error-box">Укажите ID модели ревьюера.</div>';return;}
-  const provider=selectedProvider(),payload={preset:f.elements.preset.value,case:f.elements.case.value,effort:f.elements.effort.value,attempts:+f.elements.attempts.value,repeats:+f.elements.repeats.value,provider:provider.id,reviewer_model:chosenReviewer()||defaultModel(provider,'reviewer'),attacker_model:f.elements.attacker_model?.value.trim()||defaultModel(provider,'attacker')};
+  if(f.elements.preset.value!=='screen'&&!chosenAttacker()){$('#launch-error').innerHTML='<div class="error-box">Укажите ID модели атакующего.</div>';return;}
+  const provider=selectedProvider(),payload={preset:f.elements.preset.value,case:f.elements.case.value,effort:f.elements.effort.value,attempts:+f.elements.attempts.value,repeats:+f.elements.repeats.value,provider:provider.id,reviewer_model:chosenReviewer()||defaultModel(provider,'reviewer'),attacker_model:f.elements.preset.value==='screen'?defaultModel(provider,'attacker'):chosenAttacker()};
   state.launchPending=true;$('#start-button').disabled=true;$('#start-button').textContent='Запускаем…';
   try {await enableProvider(provider.id);const r=await api('/api/start',payload); state.launchPending=false;resetAttemptBrowser();state.run=r.id;await pollOnce();navigate('runs',r.id);toast('Запуск начат. Здесь появятся новые результаты.');}
   catch(error){state.launchPending=false;$('#launch-error').innerHTML=`<div class="error-box">${esc(error.message)}</div>`;updateForm();$('#launch-error').scrollIntoView({behavior:'smooth',block:'center'});}
@@ -995,10 +1075,15 @@ $('#scenario-dialog').addEventListener('close',()=>{if(!$('#scenario-dialog').op
 $('#case-dialog').addEventListener('close',()=>{state.casePicker=null;state.casePickerTask=null;});
 window.addEventListener('hashchange',async()=>{
   if(state.scenario)closeScenario();
-  const {view,runId,taskId}=currentRoute();
-  const different=state.view!==view||(view==='runs'&&(state.runOpen!==!!runId||(runId&&state.run!==runId)))||(view==='manual'&&runId&&state.manual.runId!==runId)||(view==='tasks'&&state.taskId!==taskId);
+  const route=currentRoute(),{view,runId,taskId}=route;
+  const editorialChanged=view==='runs'&&(state.historyExample?.id||null)!==(route.historyExampleId||null);
+  const filterChanged=view==='runs'&&!runId&&(route.examples?state.runFilter!=='examples':state.runFilter==='examples');
+  const different=state.view!==view||editorialChanged||filterChanged||(view==='runs'&&(state.runOpen!==!!runId||(runId&&state.run!==runId)))||(view==='manual'&&runId&&state.manual.runId!==runId)||(view==='tasks'&&state.taskId!==taskId);
   if(different){
-    if(view==='runs'&&runId&&state.run!==runId)resetAttemptBrowser();
+    if(view==='runs') {
+      if(route.historyExampleId)selectHistoryExample(historyExampleById(route.historyExampleId));
+      else {if(editorialChanged||runId&&state.run!==runId)resetAttemptBrowser();if(route.examples)state.runFilter='examples';else if(state.runFilter==='examples')state.runFilter='all';}
+    }
     navigate(view,view==='tasks'?taskId:runId);
     if(runId){try{await detail(runId);if(state.view==='runs'&&state.runOpen&&state.run===runId)renderRuns();if(state.view==='manual'&&state.manual.runId===runId)renderManual();}catch(error){toast(error.message);}}
   }
@@ -1006,7 +1091,10 @@ window.addEventListener('hashchange',async()=>{
 async function pollOnce() {
   const previous=JSON.stringify(state.data?.active), previousRuns=JSON.stringify(state.data?.runs);
   const previousExamples=JSON.stringify(state.data?.cases?.map(c=>[c.id,c.example_run]));
+  const previousHistory=JSON.stringify(state.data?.history_examples);
   const data=await api('/api/state');state.data=data;
+  const historyChanged=previousHistory!==JSON.stringify(data.history_examples);
+  if(state.historyExample&&!historyExampleById(state.historyExample.id))state.historyExample=null;
   if(previousExamples!==JSON.stringify(data.cases.map(c=>[c.id,c.example_run]))) {
     if(state.view==='tasks')refreshTaskProof($('#main'),taskPageMarkup());
     if(state.casePickerTask) {
@@ -1020,11 +1108,11 @@ async function pollOnce() {
     const selected=state.run,old=JSON.stringify(state.details.get(selected));
     try{await detail(selected);}catch(error){if(data.active.id!==selected)throw error;}
     if(state.view==='runs'&&state.runOpen&&state.run===selected){
-      if(old!==JSON.stringify(state.details.get(selected))||previous!==JSON.stringify(data.active)||previousRuns!==JSON.stringify(data.runs))refreshRunView();
+      if(historyChanged||old!==JSON.stringify(state.details.get(selected))||previous!==JSON.stringify(data.active)||previousRuns!==JSON.stringify(data.runs))refreshRunView();
       else if($('#active-slot'))$('#active-slot').innerHTML=isSimpleRun(state.details.get(selected))&&!data.active.running?'':liveBanner();
     }
   }
-  if(state.view==='runs'&&!state.runOpen&&(previous!==JSON.stringify(data.active)||previousRuns!==JSON.stringify(data.runs)))renderRunList();
+  if(state.view==='runs'&&!state.runOpen&&(historyChanged||previous!==JSON.stringify(data.active)||previousRuns!==JSON.stringify(data.runs)))renderRunList();
   if(state.view==='launch'&&previous!==JSON.stringify(data.active)){updateForm();if($('#active-slot'))$('#active-slot').innerHTML=liveBanner();}
   if(state.view==='manual') {
     const selected=state.manual.runId,old=JSON.stringify(state.details.get(selected));
@@ -1043,6 +1131,8 @@ async function init() {
   try {
     await pollOnce();
     const route=currentRoute();
+    if(route.examples)state.runFilter='examples';
+    if(route.historyExampleId)selectHistoryExample(historyExampleById(route.historyExampleId));
     restoreManualDraft();
     state.run=route.runId||(state.data.runs.some(r=>r.id===state.data.featured)?state.data.featured:state.data.runs[0]?.id);
     state.demoRun=state.data.runs.some(r=>r.id===state.data.featured)?state.data.featured:state.data.runs.find(r=>r.manifest.cases.includes('owner')&&r.manifest.status==='completed')?.id;

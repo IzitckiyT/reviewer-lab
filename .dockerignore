@@ -20,4 +20,5 @@ runs/*
 !runs/replication-collision-low-2026-10-19
 !runs/replication-collision-medium-2026-10-19
 !runs/live-smoke-2026-10-21
+!runs/example-*-2026-10-21
 **/.ui-logs
