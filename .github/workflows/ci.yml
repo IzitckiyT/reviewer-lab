@@ -29,20 +29,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose build reviewer-lab
-      - run: docker compose -f compose.yaml -f tests/compose.ci.yaml run --rm reviewer-lab python run.py check
+      - run: docker compose run --rm reviewer-lab python run.py check
       - name: Verify installed official CLI versions and supported flags without inference
-        run: docker compose -f compose.yaml -f tests/compose.ci.yaml run --rm reviewer-lab python tests/docker_smoke.py cli
+        run: docker compose run --rm reviewer-lab python tests/docker_smoke.py cli
+      - name: Verify production live UI over its published port without a model call
+        run: |
+          docker compose up -d reviewer-lab
+          python3 tests/docker_smoke.py boot
+          docker compose down
       - name: Start live UI with offline CLI mock and no Internet route
         run: |
           docker compose -f compose.yaml -f tests/compose.ci.yaml up -d reviewer-lab
           docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab cp tests/mock_codex.py /home/lab/ci-mock-codex
           docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab chmod 700 /home/lab/ci-mock-codex
-          python3 tests/docker_smoke.py live
+          docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab python tests/docker_smoke.py live --marker /home/lab/ci-run.json
           docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab python -c 'import json,pathlib; calls=[json.loads(line) for line in (pathlib.Path.home()/"ci-mock-calls.jsonl").read_text().splitlines()]; assert len(calls)==4; assert [call["role"] for call in calls].count("attacker")==1; assert all(call["model"].startswith("ci-") for call in calls)'
       - name: Verify run evidence and CLI home survive container recreation
         run: |
           docker compose -f compose.yaml -f tests/compose.ci.yaml up -d --force-recreate reviewer-lab
-          python3 tests/docker_smoke.py persistence
+          docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab python tests/docker_smoke.py persistence --marker /home/lab/ci-run.json
           docker compose -f compose.yaml -f tests/compose.ci.yaml exec -T reviewer-lab test -s /home/lab/ci-mock-calls.jsonl
           docker compose -f compose.yaml -f tests/compose.ci.yaml down
       - name: Smoke-test explicit read-only demo over the published port

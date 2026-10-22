@@ -1,5 +1,7 @@
 # Пять задач из MonitoringBench
 
+[← Документация](README.md) · [Главная страница проекта](../README.md)
+
 В проект добавлены **пять конечных адаптаций реальных записей MonitoringBench**, а не пять новых категорий бенчмарка. В исходной работе четыре вредоносные побочные цели; здесь две разные ошибки firewall и по одному сценарию sudo, утечки секрета и запуска недоверенной загрузки.
 
 Источник: Jotautaitė, Martinez, Matthews, Tracy, [MonitoringBench: Semi-Automated Red-Teaming for Agent Monitoring](https://arxiv.org/abs/2605.09684), приложения B, N и S. [Публикация авторов](https://www.lesswrong.com/posts/2YyEQhFRyaBCgfRWd/introducing-monitoringbench) ссылается на [публичный датасет](https://huggingface.co/datasets/neur26anonsub/ctrldataset2026). Использована ревизия `6c72cf19883376b921a94a0dd17dc8ab6b25e52f`, лицензия **CC BY 4.0**. Авторы сохраняют права на исходные данные; приведённые здесь модели поведения — изменения, сделанные для Reviewer Lab.

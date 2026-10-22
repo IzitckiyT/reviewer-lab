@@ -1,7 +1,8 @@
 """Docker smoke checks, called explicitly by CI rather than unittest discovery.
 
-`cli` runs inside the image without inference; HTTP checks run on the CI host.
-Live inference is replaced by tests/mock_codex.py on an internal Docker bridge.
+`cli`, `live` and `persistence` run inside the image. `boot` and `demo` test the
+published port from the CI host. Live inference uses an offline CLI mock on an
+internal bridge; Docker does not publish ports for internal-only networks.
 """
 import argparse
 import hashlib
@@ -77,6 +78,40 @@ def saved_examples(state):
     assert all(item.get("verified") is True for item in history)
 
 
+def boot_checks(origin):
+    """Test the unmodified live service's published port without launching a run."""
+    state = wait_state(origin)
+    assert state["read_only"] is False
+    assert state["live_available"] is True
+    assert state["active"]["id"] is None
+    assert state["active"]["running"] is False
+    providers = {provider["id"]: provider for provider in state["providers"]}
+    assert set(providers) == {"codex", "claude", "deepseek"}
+    for provider in ("codex", "claude"):
+        assert providers[provider]["available"] is True
+        assert providers[provider]["models"]
+    saved_examples(state)
+    requests = [
+        urllib.request.Request(origin + "/api/state", headers={"Host": "example.invalid"}),
+        urllib.request.Request(origin + "/api/start", data=b"{}", headers={
+            "Content-Type": "application/json", "Origin": origin, "X-Lab-Token": "invalid-ci-token"}),
+        urllib.request.Request(origin + "/api/start", data=b"{}", headers={
+            "Content-Type": "application/json", "Origin": "https://example.invalid",
+            "X-Lab-Token": state["token"]}),
+    ]
+    for request in requests:
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as error:
+            assert error.code == 403
+        else:
+            raise AssertionError("Live service accepted an unauthorized host, token or origin")
+    after = fetch(origin, "/api/state")
+    assert after["active"] == state["active"]
+    assert {run["id"] for run in after["runs"]} == {run["id"] for run in state["runs"]}
+    print("Production live UI and model choices are reachable on the published port; unauthorized requests rejected; no run launched.")
+
+
 def live_checks(origin, marker):
     state = wait_state(origin)
     assert state["read_only"] is False
@@ -138,12 +173,14 @@ def demo_checks(origin):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("cli", "live", "persistence", "demo"))
+    parser.add_argument("mode", choices=("cli", "boot", "live", "persistence", "demo"))
     parser.add_argument("--origin", default="http://127.0.0.1:8765")
     parser.add_argument("--marker", type=Path, default=Path("/tmp/reviewer-lab-ci-run.json"))
     args = parser.parse_args()
     if args.mode == "cli":
         cli_checks()
+    elif args.mode == "boot":
+        boot_checks(args.origin)
     elif args.mode == "live":
         live_checks(args.origin, args.marker)
     elif args.mode == "persistence":
