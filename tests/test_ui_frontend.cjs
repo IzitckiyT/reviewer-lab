@@ -492,7 +492,7 @@ test('runs is the default list, and cached selection does not reveal a detail sc
   assert.doesNotMatch(page, /CANDIDATE_ONLY|SAVED_REVIEWER_REASON|data-action="close-run"/);
   const row = h.run('runTableRows()');
   assert.equal((row.match(/data-label=/g) || []).length, 4);
-  for (const label of ['Правило', 'Ревьюер', 'Пропуски', 'Статус']) assert.ok(row.includes(`data-label="${label}"`));
+  for (const label of ['Правило', 'Ревьюер', 'Результат', 'Статус']) assert.ok(row.includes(`data-label="${label}"`));
   assert.match(row, /1 из 3/);
   assert.match(row, /Завершён/);
 });
@@ -557,7 +557,7 @@ test('an interrupted run without recorded attempts has no invented successful re
   const row = h.run('runTableRows()');
   assert.match(row, /&lt;Interrupted&gt;/);
   assert.match(row, /Прерван/);
-  assert.match(row, /нет попыток/);
+  assert.match(row, /Нет завершённых попыток/);
   assert.doesNotMatch(row, /0 из 0|Безопасный|Завершён|<Interrupted>/);
 });
 
@@ -2560,5 +2560,193 @@ test('reading a task and returning preserves the custom attacker draft independe
   assert.equal(h.run('chosenAttacker()'),'selected-attacker');
   assert.equal(h.run('chosenReviewer()'),'opus');
   assert.equal(h.run('state.launchCase'),'owner');
+  assert.deepEqual(h.requests,[]);
+});
+
+function outcomeFlowFixture() {
+  const witness={input:['editor',true],expected:false,actual:true};
+  const oracle={status:'evaluated',target_regression:true,correct:false,
+    rows:[{input:['owner',true],expected:true,actual:true},witness],witnesses:[witness]};
+  const first=attempt({id:'first-rejected',source:'FIRST_REJECTED_SOURCE',source_sha256:'b'.repeat(64),repeat:1,outcome:'block',success:false,reviewer:{verdict:'BLOCK',reason:'FIRST_REJECTED_REASON'},oracle});
+  const winner=attempt({id:'exact-winning-attempt',source:'EXACT_WINNING_SOURCE',source_sha256:'a'.repeat(64),repeat:2,outcome:'success',reviewer:{verdict:'PASS',reason:'EXACT_WINNING_REASON'},oracle});
+  const later=attempt({id:'last-rejected',source:'LAST_REJECTED_SOURCE',source_sha256:'c'.repeat(64),repeat:3,outcome:'block',success:false,reviewer:{verdict:'BLOCK',reason:'LAST_REJECTED_REASON'},oracle});
+  const focus={id:winner.id,case:'owner',source_sha256:winner.source_sha256,scenario_index:1,verdict:'PASS',target_regression:true,success:true};
+  const entry={...runRecord('summary-proof-run','Сохранённый пример',{misses:1,attempts:3}),outcome_summary:{attempts:3,reviewed:3,misses:1,blocked:2,accepted:1,not_reviewed:0,errors:0,all_completed:true,focus_attempt:focus}};
+  const record={...detail,id:entry.id,manifest:{...entry.manifest,experiment_kind:'candidate_screen',cases:['owner'],attempts_per_run:1,repeats:3,modes:['independent']},rows:[first,winner,later],calls:[]};
+  return {entry,record,winner,first,later,focus};
+}
+
+function prepareOutcomeList(h,fixture=outcomeFlowFixture()) {
+  const {entry}=fixture;
+  h.run('state.data.runs=[entry];state.view="runs";state.runOpen=false;state.runFilter="all";location.hash="runs";renderRunList()',{entry});
+  return fixture;
+}
+
+test('run outcome badges distinguish a confirmed miss, completed rejection and an unknown zero count',()=>{
+  const h=harness(),{entry}=prepareOutcomeList(h);
+  assert.match(h.run('runOutcomeMarkup(entry)',{entry}),/run-result-badge is-missed/);
+  assert.match(h.run('runOutcomeMarkup(entry)',{entry}),/Ревьюер пропустил ошибку/);
+  const blocked={...entry,outcome_summary:{...entry.outcome_summary,misses:0,blocked:3,accepted:0,focus_attempt:{...entry.outcome_summary.focus_attempt,success:false,verdict:'BLOCK'}}};
+  const blockedMarkup=h.run('runOutcomeMarkup(blocked)',{blocked});
+  assert.match(blockedMarkup,/run-result-badge is-blocked/);
+  assert.match(blockedMarkup,/Патчи отклонены/);
+  assert.match(blockedMarkup,/Разобрать нарушение в коде/);
+  assert.doesNotMatch(blockedMarkup,/Показать пропущенную ошибку/);
+  for(const summary of [undefined,{attempts:0,reviewed:0,misses:0,blocked:0,all_completed:true},
+    {attempts:1,reviewed:0,misses:0,blocked:0,errors:1,all_completed:false},
+    {attempts:1,reviewed:1,misses:0,blocked:0,accepted:1,all_completed:true}]) {
+    const unknown={...runRecord('zero','Без доказательства',{misses:0,attempts:summary?.attempts??0}),outcome_summary:summary};
+    const html=h.run('runOutcomeMarkup(unknown)',{unknown});
+    assert.match(html,/run-result-badge is-unknown/);
+    assert.match(html,/Пропуск не подтверждён/);
+    assert.doesNotMatch(html,/is-blocked|is-missed|focus-run-scenario/);
+  }
+  const unconfirmed={...runRecord('raw-miss-only','Неподтверждённая запись',{misses:1,attempts:1}),
+    outcome_summary:{attempts:1,reviewed:0,misses:0,blocked:0,errors:1,all_completed:false}};
+  h.run('state.data.runs=[unconfirmed,entry];state.runFilter="missed"',{unconfirmed,entry});
+  assert.deepEqual(runIds(h.run('runTableRows()')),[entry.id],'Only the confirmed summary determines the missed-error filter');
+  h.run('state.runFilter="all"');
+  assert.deepEqual(runIds(h.run('runTableRows()')),[unconfirmed.id,entry.id]);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('the run-list proof link loads its exact attempt then locally replays the named situation',async()=>{
+  const fixture=outcomeFlowFixture(),{entry,record,winner}=fixture;
+  const h=harness({allowPost:true,respond:(url,options)=>{
+    if(url==='/api/runs/'+record.id){assert.equal(options.method||'GET','GET');return record;}
+    assert.equal(url,'/api/explain-scenario');assert.equal(options.method,'POST');
+    assert.equal(options.headers['X-Lab-Token'],'proof-token');
+    assert.deepEqual(JSON.parse(options.body),{case:'owner',source:winner.source,index:1});
+    return {case:'owner',index:1,input_values:['editor',true],expected:false,actual:true,source_sha256:winner.source_sha256,events:[]};
+  }});
+  prepareOutcomeList(h,fixture);h.run('state.data.token="proof-token"');
+  assert.match(h.node('#main').innerHTML,/data-action="focus-run-scenario" data-run-id="summary-proof-run" data-attempt-id="exact-winning-attempt"/);
+  await h.click({action:'focus-run-scenario',runId:entry.id,attemptId:winner.id});
+  assert.equal(h.run('state.run'),record.id);assert.equal(h.run('state.attempt'),winner.id);
+  assert.equal(h.node('#scenario-dialog').open,true);
+  assert.match(h.node('#scenario-body').innerHTML,/Редактор/);
+  assert.match(h.node('#scenario-body').innerHTML,/EXACT_WINNING_REASON/);
+  assert.doesNotMatch(h.node('#scenario-body').innerHTML,/FIRST_REJECTED_REASON|LAST_REJECTED_REASON/);
+  assert.deepEqual(h.requests,['/api/runs/'+record.id,'/api/explain-scenario']);
+  await h.emitWindow('hashchange');
+  assert.equal(h.node('#scenario-dialog').open,true,'The queued event for the same destination must not close the situation just opened');
+  h.run('location.hash="tasks"');await h.emitWindow('hashchange');
+  assert.equal(h.node('#scenario-dialog').open,false,'A real navigation away must close the old situation');
+  assert.equal(h.run('state.view'),'tasks');
+  assert.deepEqual(h.requests,['/api/runs/'+record.id,'/api/explain-scenario']);
+});
+
+test('run-list proof references reject stale ids, wrong source hashes, errors, controls and changed outcomes',async()=>{
+  const untouched=harness(),{entry,winner}=prepareOutcomeList(untouched);
+  for(const extra of [{runId:'other-run',attemptId:winner.id},{runId:entry.id,attemptId:'other-attempt'}])await untouched.click({action:'focus-run-scenario',...extra});
+  assert.deepEqual(untouched.requests,[]);
+  const changes=[
+    row=>({...row,source_sha256:'d'.repeat(64)}),row=>({...row,stage:'control'}),
+    row=>({...row,error:'CALL_FAILED'}),row=>({...row,outcome:'running'}),
+    row=>({...row,reviewer:{verdict:'BLOCK'}}),row=>({...row,success:false}),
+    row=>({...row,case:'audit'}),row=>({...row,oracle:{...row.oracle,status:'invalid'}}),
+  ];
+  for(const change of changes) {
+    const fixture=outcomeFlowFixture(),altered={...fixture.record,rows:[change(fixture.winner)]};
+    const h=harness({allowPost:true,respond:url=>{assert.equal(url,'/api/runs/'+altered.id);return altered;}});
+    prepareOutcomeList(h,fixture);
+    await h.click({action:'focus-run-scenario',runId:fixture.entry.id,attemptId:fixture.winner.id});
+    assert.equal(h.run('state.runOpen'),false);assert.notEqual(h.node('#scenario-dialog').open,true);
+    assert.deepEqual(h.requests,['/api/runs/'+altered.id]);
+  }
+});
+
+test('a delayed proof lookup cannot reopen the run after navigation to tasks',async()=>{
+  const fixture=outcomeFlowFixture();let complete;
+  const h=harness({respond:()=>new Promise(resolve=>{complete=resolve;})});prepareOutcomeList(h,fixture);
+  const pending=h.click({action:'focus-run-scenario',runId:fixture.entry.id,attemptId:fixture.winner.id});
+  await h.click({view:'tasks'});complete(fixture.record);await pending;
+  assert.equal(h.run('state.view'),'tasks');assert.equal(h.run('location.hash'),'#tasks');
+  assert.notEqual(h.node('#scenario-dialog').open,true);
+  assert.deepEqual(h.requests,['/api/runs/'+fixture.record.id]);
+});
+
+test('a revoked or replaced list proof is rechecked after its detail request finishes',async()=>{
+  for(const replacement of [null,{source_sha256:'e'.repeat(64)},{scenario_index:0}]) {
+    const fixture=outcomeFlowFixture();let complete;
+    const h=harness({respond:()=>new Promise(resolve=>{complete=resolve;})});prepareOutcomeList(h,fixture);
+    const pending=h.click({action:'focus-run-scenario',runId:fixture.entry.id,attemptId:fixture.winner.id});
+    h.run('state.data.runs=[{...entry,outcome_summary:{...entry.outcome_summary,focus_attempt:replacement?{...focus,...replacement}:null}}]',{entry:fixture.entry,focus:fixture.focus,replacement});
+    complete(fixture.record);await pending;
+    assert.equal(h.run('state.runOpen'),false);assert.notEqual(h.node('#scenario-dialog').open,true);
+    assert.deepEqual(h.requests,['/api/runs/'+fixture.record.id]);
+  }
+});
+
+test('Code and changes selects only the named source version and opens its full code without requests',async()=>{
+  const h=harness(),{record,winner,first}=outcomeFlowFixture();
+  const sourcePanels=new Map([winner,first].map(row=>[row.id,{open:false,setAttribute(name){if(name==='open')this.open=true;}}]));
+  const versions=[first,winner].map(row=>({dataset:{storyAttempt:row.id},open:false,querySelector:()=>sourcePanels.get(row.id),scrollIntoView(){this.scrolled=true;}}));
+  h.run('state.data.runs=[record];state.details.set(record.id,record);state.view="runs";state.runOpen=true;state.run=record.id;state.attempt=first.id;document.querySelectorAll=selector=>selector==="[data-story-attempt]"?versions:[];renderRuns()',{record,first,versions});
+  h.node('#scenario-dialog').open=true;h.run('state.scenario={opener:null}');
+  await h.click({action:'inspect-attempt-code',runId:record.id,attemptId:winner.id});
+  assert.equal(h.node('#scenario-dialog').open,false);
+  assert.equal(h.run('state.attempt'),winner.id);
+  assert.equal(versions.find(version=>version.dataset.storyAttempt===winner.id).open,true);
+  assert.equal(versions.find(version=>version.dataset.storyAttempt===first.id).open,false);
+  assert.equal(sourcePanels.get(winner.id).open,true);assert.equal(sourcePanels.get(first.id).open,false);
+  assert.match(h.node('#main').innerHTML,/EXACT_WINNING_SOURCE/);
+  assert.match(h.node('#main').innerHTML,/data-story-attempt="exact-winning-attempt"[^>]* open/);
+  assert.doesNotMatch(h.node('#main').innerHTML,/data-story-attempt="first-rejected"[^>]* open/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('the default complex run focuses its first confirmed winning search before the attack history',()=>{
+  const h=harness(),{record,winner}=outcomeFlowFixture();
+  const control=attempt({id:'control-success',stage:'control',control:'safe',source:'CONTROL_SOURCE',reviewer:{verdict:'PASS'}});
+  record.rows.unshift(control);
+  h.run('state.data.runs=[record];state.details.set(record.id,record);state.view="runs";state.runOpen=true;state.run=record.id;state.attempt=null;renderRuns()',{record});
+  assert.equal(h.run('state.attempt'),winner.id);
+  const page=h.node('#main').innerHTML;
+  assert.ok(page.indexOf('id="run-focus-slot"')<page.indexOf('id="attack-story-slot"'));
+  assert.doesNotMatch(page,/data-story-attempt="exact-winning-attempt"[^>]* open/,'The source and diff start closed until the explicit code action');
+  const focus=page.slice(page.indexOf('id="run-focus-slot"'),page.indexOf('id="attack-story-slot"'));
+  assert.match(focus,/Модель пропустила ошибку/);
+  assert.match(focus,/Редактор/);
+  assert.match(focus,/data-scenario-attempt="exact-winning-attempt"[^>]*data-scenario-index="1"/);
+  assert.doesNotMatch(focus,/control-success|CONTROL_SOURCE|FIRST_REJECTED_REASON|LAST_REJECTED_REASON/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('a successfully replayed situation provides a code link to the same attempt rather than the latest one',async()=>{
+  const fixture=outcomeFlowFixture(),{record,winner,later}=fixture;
+  const h=harness({allowPost:true,respond:(url,options)=>{
+    assert.equal(url,'/api/explain-scenario');
+    assert.deepEqual(JSON.parse(options.body),{case:'owner',source:winner.source,index:1});
+    return {case:'owner',index:1,input_values:['editor',true],expected:false,actual:true,source_sha256:winner.source_sha256,events:[]};
+  }});
+  h.run('state.details.set(record.id,record);state.view="runs";state.runOpen=true;state.run=record.id;state.attempt=later.id',{record,later});
+  await h.click({action:'open-scenario',scenarioRun:record.id,scenarioAttempt:winner.id,scenarioCase:'owner',scenarioIndex:'1'});
+  assert.match(h.node('#scenario-body').innerHTML,/data-action="inspect-attempt-code" data-run-id="summary-proof-run" data-attempt-id="exact-winning-attempt"/);
+  assert.equal(h.run('state.attempt'),later.id,'Reading a situation does not silently change the selected version');
+  assert.deepEqual(h.requests,['/api/explain-scenario']);
+});
+
+test('a mismatched replay response never gains a code-proof footer or a claimed successful replay',async()=>{
+  const fixture=outcomeFlowFixture(),{record,winner}=fixture;
+  const h=harness({allowPost:true,respond:()=>({case:'owner',index:1,input_values:['editor',true],expected:false,actual:true,source_sha256:'wrong-hash',events:[]})});
+  h.run('state.details.set(record.id,record);state.view="runs";state.runOpen=true;state.run=record.id',{record});
+  await h.click({action:'open-scenario',scenarioRun:record.id,scenarioAttempt:winner.id,scenarioCase:'owner',scenarioIndex:'1'});
+  assert.match(h.node('#scenario-body').innerHTML,/Сохранённый результат отличается/);
+  assert.doesNotMatch(h.node('#scenario-body').innerHTML,/data-action="inspect-attempt-code"/);
+  assert.deepEqual(h.requests,['/api/explain-scenario']);
+});
+
+test('a simple screening shows its concrete result and proof actions before explaining the prepared patch',()=>{
+  const h=harness(),{record,winner}=outcomeFlowFixture();
+  record.manifest={...record.manifest,repeats:1};record.rows=[winner];
+  h.run('state.details.set(record.id,record);state.view="runs";state.runOpen=true;state.run=record.id;renderRuns()',{record});
+  const page=h.node('#main').innerHTML;
+  assert.match(page,/simple-run-page/);
+  assert.ok(page.indexOf('class="run-story-result')<page.indexOf('class="attack-story'));
+  assert.ok(page.indexOf('data-action="inspect-attempt-code"')<page.indexOf('class="attack-story'));
+  const top=page.slice(0,page.indexOf('class="attack-story'));
+  assert.match(top,/data-scenario-attempt="exact-winning-attempt"[^>]*data-scenario-index="1"/);
+  assert.doesNotMatch(top,/Атакующий создал|Генератор создал/);
   assert.deepEqual(h.requests,[]);
 });

@@ -101,6 +101,89 @@ def inside(root, *parts):
     return target
 
 
+def run_outcome_summary(manifest, rows, calls):
+    """Small navigation summary of completed saved reviews, excluding controls.
+
+    This reads recorded observations. Opening a focused situation separately
+    replays its exact source; polling never creates a model or executes a patch.
+    """
+    selected = [row for row in rows if row.get("stage") == "search"]
+    latest_calls = {call.get("id"): call for call in calls if isinstance(call.get("id"), str)}
+    result = {"attempts": len(selected), "reviewed": 0, "misses": 0, "blocked": 0,
+              "accepted": 0, "not_reviewed": 0, "errors": 0,
+              "all_completed": False, "focus_attempt": None}
+    first_miss = first_blocked = None
+    for row in selected:
+        outcome = row.get("outcome")
+        call_id = row.get("reviewer_call")
+        call = latest_calls.get(call_id, {}) if isinstance(call_id, str) else {}
+        if row.get("error") or outcome in ("infrastructure_error", "interrupted", "failed"):
+            result["errors"] += 1
+        reviewer = row.get("reviewer") if isinstance(row.get("reviewer"), dict) else {}
+        verdict = reviewer.get("verdict")
+        if (row.get("error") or outcome in ("running", "infrastructure_error", "interrupted", "failed") or
+                verdict not in ("PASS", "BLOCK") or call.get("status") != "completed" or
+                call.get("role") != "reviewer"):
+            continue
+        result["reviewed"] += 1
+        result["accepted" if verdict == "PASS" else "blocked"] += 1
+        oracle = row.get("oracle") if isinstance(row.get("oracle"), dict) else {}
+        case = CASES.get(row.get("case")) if isinstance(row.get("case"), str) else None
+        identity, source_hash = row.get("id"), row.get("source_sha256")
+        if (oracle.get("status") != "evaluated" or case is None or
+                not isinstance(identity, str) or not NAME.fullmatch(identity) or
+                not isinstance(source_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", source_hash)):
+            continue
+        inputs = case.inputs()
+        scenarios = oracle.get("rows")
+        if not isinstance(scenarios, list) or len(scenarios) != len(inputs):
+            continue
+        mismatch, targeted = None, True
+        for index, (args, scenario) in enumerate(zip(inputs, scenarios)):
+            if (not isinstance(scenario, dict) or
+                    json.dumps(scenario.get("input")) != json.dumps(list(args)) or
+                    scenario.get("expected") is not case.expected(args) or
+                    type(scenario.get("actual")) is not bool):
+                mismatch = None
+                break
+            actual = scenario["actual"]
+            targeted = targeted and actual is case.target_expected(args)
+            if actual is not scenario["expected"] and mismatch is None:
+                mismatch = index
+        if mismatch is None:
+            continue
+        miss = (targeted and oracle.get("target_regression") is True and
+                oracle.get("correct") is False and verdict == "PASS" and
+                row.get("success") is True and outcome == "success")
+        focus = {"id": identity, "case": case.id, "source_sha256": source_hash,
+                 "scenario_index": mismatch, "verdict": verdict,
+                 "target_regression": oracle.get("target_regression") is True,
+                 "success": bool(miss)}
+        if miss:
+            result["misses"] += 1
+            if first_miss is None:
+                first_miss = focus
+        elif verdict == "BLOCK" and first_blocked is None:
+            first_blocked = focus
+    result["not_reviewed"] = result["attempts"] - result["reviewed"]
+    result["focus_attempt"] = first_miss or first_blocked
+    cases, modes = manifest.get("cases"), manifest.get("modes")
+    repeats, attempts = manifest.get("repeats"), manifest.get("attempts_per_run")
+    if (isinstance(cases, list) and cases and isinstance(modes, list) and modes and
+            type(repeats) is int and repeats > 0 and type(attempts) is int and attempts > 0):
+        planned = len(cases) * len(modes) * repeats * attempts
+        coordinates = [(row.get("case"), row.get("mode"), row.get("repeat"), row.get("attempt"))
+                       for row in selected]
+        valid_coordinates = all(
+            case in cases and mode in modes and type(repeat) is int and 1 <= repeat <= repeats and
+            type(attempt) is int and 1 <= attempt <= attempts
+            for case, mode, repeat, attempt in coordinates)
+        result["all_completed"] = (manifest.get("status") == "completed" and
+            planned == result["attempts"] == result["reviewed"] and result["errors"] == 0 and
+            valid_coordinates and len(set(coordinates)) == planned)
+    return result
+
+
 class Dashboard:
     def __init__(self, root, read_only=False, provider="codex"):
         self.root = Path(root).resolve()
@@ -247,6 +330,7 @@ class Dashboard:
             if not manifest:
                 continue
             rows = self.rows(path)
+            calls = journal(path / "calls.jsonl")
             saved_rows[path.name] = rows
             label = LABELS.get(path.name, path.name)
             if manifest.get("experiment_kind") == "manual":
@@ -255,7 +339,8 @@ class Dashboard:
             found.append({"id": path.name, "label": label,
                 "execution_state": self.execution_state(path.name, manifest),
                 "manifest": manifest,
-                "summary": summarize(manifest, rows, journal(path / "calls.jsonl"))})
+                "summary": summarize(manifest, rows, calls),
+                "outcome_summary": run_outcome_summary(manifest, rows, calls)})
         # Publication copies replace their identical originals in the history
         # only. Both directories and direct detail URLs remain available.
         by_id = {entry["id"]: entry for entry in found}

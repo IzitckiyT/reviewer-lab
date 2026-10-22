@@ -34,4 +34,15 @@
 .single-run-story .run-story-control>details p {white-space:pre-wrap;overflow-wrap:anywhere}
 .single-run-story .run-story-limit,.single-run-story .run-story-small {font-size:12px;line-height:1.7;color:var(--muted)}
 .single-run-story .run-story-limit {margin:22px 0 0}
-@media(max-width:640px) {.single-run-story h1{font-size:24px}.single-run-story .run-story-result{padding:22px 20px}.single-run-story h2{font-size:21px}.single-run-story .run-story-pair{grid-template-columns:1fr;gap:18px}.single-run-story .run-story-control{grid-template-columns:1fr;gap:3px}}
+.run-story-proof-actions,.run-focus-actions {display:flex;align-items:center;flex-wrap:wrap;gap:10px 22px;margin-top:18px}
+.run-story-proof-actions .text-button,.run-focus-actions .text-button {min-height:36px;max-width:100%;padding:6px 0;color:#46759f;font:400 13px/1.5 var(--sans);text-align:left;white-space:normal}
+.run-story-proof-actions .text-button:hover,.run-focus-actions .text-button:hover {color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.run-focus-result {margin:0 0 24px;padding:27px 30px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.run-focus-result h2 {margin:0 0 10px;font:500 24px/1.3 var(--sans);letter-spacing:-.4px}
+.run-focus-result>p {color:var(--muted);font-size:14px;line-height:1.7}
+.run-focus-result.is-missed h2,.run-focus-result.missed h2 {color:var(--red)}
+.run-focus-result.is-blocked h2,.run-focus-result.reviewed h2 {color:var(--teal)}
+.run-focus-pair {display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.run-focus-pair span {display:block;margin-bottom:7px;color:var(--muted);font-size:12px}
+.run-focus-pair strong {font-size:15px;font-weight:500}
+@media(max-width:640px) {.single-run-story h1{font-size:24px}.single-run-story .run-story-result,.run-focus-result{padding:22px 20px}.single-run-story h2,.run-focus-result h2{font-size:21px}.single-run-story .run-story-pair,.run-focus-pair{grid-template-columns:1fr;gap:18px}.single-run-story .run-story-control{grid-template-columns:1fr;gap:3px}.run-story-proof-actions,.run-focus-actions{align-items:flex-start;gap:6px 18px}}

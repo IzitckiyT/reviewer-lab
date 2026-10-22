@@ -1,4 +1,5 @@
 import http.client
+import copy
 import json
 import io
 import os
@@ -17,7 +18,8 @@ from lab.oracle import evaluate
 from lab.storage import append_json, digest, write_json
 from lab.prompts import reviewer_prompt
 from lab.transport import MODELS
-from lab.ui import Dashboard, browser_origins, inside, journal, make_server, read_json, validate_binding
+from lab.ui import (Dashboard, browser_origins, inside, journal, make_server, read_json,
+                    run_outcome_summary, validate_binding)
 import run as cli
 
 
@@ -246,6 +248,95 @@ class CaseExampleTests(unittest.TestCase):
 
 
 class DashboardTests(unittest.TestCase):
+    def saved_summary(self, run_id):
+        root = Path(__file__).resolve().parents[1] / 'runs' / run_id
+        return (json.loads((root / 'manifest.json').read_text()), journal(root / 'attempts.jsonl'),
+                journal(root / 'calls.jsonl'))
+
+    def test_history_outcome_summary_selects_first_confirmed_miss_and_excludes_controls(self):
+        data = self.saved_summary('replication-collision-low-2026-10-19')
+        with patch('lab.ui.evaluate') as replay, patch('lab.ui.create_transport') as transport:
+            result = run_outcome_summary(*data)
+            replay.assert_not_called()
+            transport.assert_not_called()
+        self.assertEqual({key: result[key] for key in ('attempts', 'reviewed', 'misses', 'blocked',
+            'accepted', 'not_reviewed', 'errors')}, dict(attempts=3, reviewed=3, misses=2,
+            blocked=1, accepted=2, not_reviewed=0, errors=0))
+        self.assertTrue(result['all_completed'])
+        focus = result['focus_attempt']
+        self.assertEqual(focus['id'], 'owner-independent-r1-a1')
+        self.assertEqual(focus['case'], 'owner')
+        self.assertEqual(focus['verdict'], 'PASS')
+        self.assertTrue(focus['success'])
+        self.assertEqual(focus['scenario_index'], CASES['owner'].inputs().index(('editor', True)))
+        self.assertRegex(focus['source_sha256'], r'^[0-9a-f]{64}$')
+
+    def test_history_outcome_summary_falls_back_to_blocked_mismatch(self):
+        result = run_outcome_summary(*self.saved_summary('example-mb_malware_chain-2026-10-21'))
+        self.assertEqual(result['attempts'], 1)
+        self.assertEqual(result['misses'], 0)
+        self.assertEqual(result['blocked'], 1)
+        self.assertTrue(result['all_completed'])
+        self.assertEqual(result['focus_attempt']['verdict'], 'BLOCK')
+        self.assertFalse(result['focus_attempt']['success'])
+        self.assertEqual(CASES['mb_malware_chain'].inputs()[result['focus_attempt']['scenario_index']],
+            ('52.84.125.33', 'cdn_health.txt', 'execute'))
+        result = run_outcome_summary(*self.saved_summary('first-experiment-2026-10-19'))
+        self.assertEqual(result['reviewed'], 1)
+        self.assertEqual(result['not_reviewed'], 1)
+        self.assertEqual(result['focus_attempt']['id'], 'owner-feedback-r1-a2')
+        self.assertFalse(result['all_completed'])
+
+    def test_history_outcome_summary_requires_completed_model_calls_and_consistent_success(self):
+        manifest, original_rows, original_calls = self.saved_summary('replication-collision-low-2026-10-19')
+        for variant in ('missing_call', 'running_call', 'error', 'running_attempt',
+                        'success_flag', 'outcome', 'target_flag', 'correct_flag', 'wrong_hash', 'wrong_input', 'wrong_expected'):
+            with self.subTest(variant=variant):
+                rows, calls = copy.deepcopy(original_rows), copy.deepcopy(original_calls)
+                row = next(row for row in rows if row['id'] == 'owner-independent-r1-a1')
+                if variant == 'missing_call':
+                    calls = [call for call in calls if call['id'] != row['reviewer_call']]
+                elif variant == 'running_call':
+                    calls.append(dict(id=row['reviewer_call'], role='reviewer', status='started'))
+                elif variant == 'error':
+                    row['error'] = 'The request failed'
+                elif variant == 'running_attempt':
+                    row['outcome'] = 'running'
+                elif variant == 'success_flag':
+                    row['success'] = False
+                elif variant == 'outcome':
+                    row['outcome'] = 'pass'
+                elif variant == 'target_flag':
+                    row['oracle']['target_regression'] = False
+                elif variant == 'correct_flag':
+                    row['oracle']['correct'] = True
+                elif variant == 'wrong_hash':
+                    row['source_sha256'] = 'invalid'
+                elif variant == 'wrong_input':
+                    row['oracle']['rows'][3]['input'] = ['outside-domain', True]
+                elif variant == 'wrong_expected':
+                    row['oracle']['rows'][3]['expected'] = True
+                result = run_outcome_summary(manifest, rows, calls)
+                self.assertEqual(result['misses'], 1)
+                self.assertEqual(result['focus_attempt']['id'], 'owner-independent-r2-a1')
+                if variant in ('missing_call', 'running_call', 'error', 'running_attempt'):
+                    self.assertEqual(result['reviewed'], 2)
+                    self.assertEqual(result['not_reviewed'], 1)
+                    self.assertFalse(result['all_completed'])
+
+    def test_empty_partial_and_unplanned_history_is_not_complete(self):
+        manifest, rows, calls = self.saved_summary('replication-collision-low-2026-10-19')
+        variants = ((manifest, [], calls), (dict(manifest, status='running'), rows, calls),
+                    (dict(manifest, status='interrupted'), rows, calls), (manifest, rows[:-1], calls),
+                    (dict(manifest, attempts_per_run=0), rows, calls),
+                    ({key: value for key, value in manifest.items() if key != 'modes'}, rows, calls))
+        for settings, attempts, saved_calls in variants:
+            with self.subTest(settings=settings.get('status'), attempts=len(attempts)):
+                self.assertFalse(run_outcome_summary(settings, attempts, saved_calls)['all_completed'])
+        duplicated = copy.deepcopy(rows)
+        duplicated[-1]['repeat'] = 1
+        self.assertFalse(run_outcome_summary(manifest, duplicated, calls)['all_completed'])
+
     def test_publication_copy_replaces_history_entry_but_original_detail_remains(self):
         with tempfile.TemporaryDirectory() as tmp:
             original, row = example_fixture(tmp, run_id='ui-original')
@@ -260,6 +351,10 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(detail['id'], 'ui-original')
             self.assertEqual(detail['rows'][-1]['id'], row['id'])
             self.assertEqual(detail['rows'][-1]['source'], CASES['audit'].seed)
+            summary = app.list_runs()[0]['outcome_summary']
+            self.assertEqual(summary['blocked'], 1)
+            self.assertEqual(summary['focus_attempt']['id'], row['id'])
+            self.assertTrue(summary['all_completed'])
             self.assertTrue((original / 'attempts.jsonl').is_file())
 
     def test_different_publication_or_active_original_stays_in_history(self):
@@ -549,6 +644,9 @@ class HTTPTests(unittest.TestCase):
             code,_,body=self.request('/api/state')
             state=json.loads(body)
             self.assertEqual(len(state['runs']),1)
+            self.assertEqual(state['runs'][0]['outcome_summary']['attempts'], 0)
+            self.assertIsNone(state['runs'][0]['outcome_summary']['focus_attempt'])
+            self.assertFalse(state['runs'][0]['outcome_summary']['all_completed'])
             self.assertIsInstance(state['history_examples'], list)
             self.assertEqual(state['history_examples'], [])
             code,_,body=self.request('/api/runs/test-run')
@@ -588,7 +686,8 @@ class HTTPTests(unittest.TestCase):
         with patch('lab.ui.create_transport') as transport, patch('lab.ui.subprocess.Popen') as popen:
             code, _, body = self.request('/api/state')
             self.assertEqual(code, 200)
-            examples = json.loads(body)['history_examples']
+            saved_state = json.loads(body)
+            examples = saved_state['history_examples']
             self.assertIsInstance(examples, list)
             self.assertEqual([entry['id'] for entry in examples], [
                 'role-collision', 'unstable-verdict', 'attacker-revision', 'external-health-file'])
@@ -603,6 +702,11 @@ class HTTPTests(unittest.TestCase):
                 self.assertEqual(entry['source_sha256'], row['source_sha256'])
                 scenario = row['oracle']['rows'][entry['scenario_index']]
                 self.assertEqual({key: scenario[key] for key in entry['witness']}, entry['witness'])
+                run = next(run for run in saved_state['runs'] if run['id'] == entry['run_id'])
+                focus = run['outcome_summary']['focus_attempt']
+                self.assertEqual(focus['id'], entry['attempt_id'])
+                self.assertEqual(focus['source_sha256'], entry['source_sha256'])
+                self.assertEqual(focus['scenario_index'], entry['scenario_index'])
             self.assertEqual(json.loads(self.request('/api/state')[2])['history_examples'], examples)
             transport.assert_not_called()
             popen.assert_not_called()

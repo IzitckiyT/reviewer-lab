@@ -265,7 +265,7 @@ dialog::backdrop {background:#292a2d40}
 /* Experiment browser matching the native list-and-filters workspace. */
 .runs-layout {display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:24px;align-items:start}
 .runs-browser {min-width:0}
-.run-list-header,.run-row {display:grid;grid-template-columns:minmax(180px,1.9fr) minmax(125px,1.35fr) minmax(100px,1fr) minmax(85px,.9fr) minmax(90px,.95fr);gap:16px;align-items:center}
+.run-list-header,.run-row {display:grid;grid-template-columns:minmax(150px,1.7fr) minmax(110px,1.15fr) minmax(85px,.85fr) minmax(150px,1.3fr) minmax(80px,.8fr);gap:12px;align-items:center}
 .run-list-header {padding:0 23px 15px;color:#929eae;font-size:12px;line-height:1.45}
 .run-list-header>div,.run-row>div {min-width:0}
 #run-table-body {min-width:0}
@@ -279,6 +279,7 @@ dialog::backdrop {background:#292a2d40}
 .run-row .run-choice:hover b {color:#087dff}
 .run-row .run-choice small {display:block;margin-top:7px;color:#9aa5b4;font-size:12px;line-height:1.6;font-weight:400}
 .run-kind {display:block;margin-top:5px;color:#929faf;font-size:12px;line-height:1.5}
+.run-case-inline {display:none}
 .run-case,.run-model,.run-outcome,.run-status {min-width:0;line-height:1.65}
 .run-case>span,.run-case>strong,.run-model>span,.run-model>strong,.run-outcome>span,.run-outcome>strong {display:block;color:#8090a5;font-size:12px;font-weight:400;overflow-wrap:anywhere}
 .run-case small,.run-model small,.run-outcome small {display:block;margin-top:7px;color:#99a5b5;font-size:12px;line-height:1.6}
@@ -351,17 +352,24 @@ dialog::backdrop {background:#292a2d40}
 .guide .guide-detail>summary:hover,.guide .guide-code>summary:hover {color:#087dff}
 .guide .guide-progress li.current {color:#087dff;border-bottom-color:#087dff}
 @media(max-width:1250px) {
- .run-list-header,.run-row {grid-template-columns:minmax(150px,1.8fr) minmax(110px,1.25fr) minmax(85px,1fr) minmax(70px,.8fr) minmax(80px,.95fr);gap:12px}
+ .run-list-header,.run-row {grid-template-columns:minmax(150px,1.7fr) minmax(110px,1.15fr) minmax(85px,.85fr) minmax(150px,1.3fr) minmax(80px,.8fr);gap:12px}
  .run-row {padding:20px;min-height:120px}.run-list-header {padding-left:20px;padding-right:20px}
- .runs-layout {grid-template-columns:minmax(0,1fr) 220px;gap:20px}.filter-panel {padding:22px 18px}
+ .runs-layout {grid-template-columns:minmax(0,1fr);gap:23px}.filter-panel {grid-row:1;padding:18px}
 }
 @media(max-width:1000px) {
  .runs-layout {grid-template-columns:minmax(0,1fr);gap:23px}
  .filter-panel {grid-row:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;padding:18px}
  .filter-heading {grid-column:1/-1;margin:0}
  .filter-field {margin:0}.filter-field input,.filter-field select {font-size:12px;padding-left:9px;padding-right:9px}
- .run-list-header,.run-row {grid-template-columns:minmax(160px,1.8fr) minmax(110px,1.25fr) minmax(85px,1fr) minmax(70px,.8fr) minmax(80px,.95fr)}
  .run-workspace {padding:20px}
+}
+@media(min-width:681px) and (max-width:1000px) {
+ .run-list-header,.run-row {grid-template-columns:minmax(150px,1.6fr) minmax(75px,.8fr) minmax(140px,1.3fr) minmax(80px,.8fr)}
+ .run-case,.run-list-header>span:nth-child(2) {display:none}
+ .run-case-inline {display:block;margin-top:7px;color:#707d8f;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+}
+@media(min-width:681px) and (max-width:740px) {
+ .run-list-header,.run-row {grid-template-columns:minmax(0,1fr) 75px 140px 80px;gap:8px;padding-left:14px;padding-right:14px}
 }
 @media(max-width:680px) {
  .runs-layout {gap:21px}.filter-panel {grid-template-columns:repeat(2,minmax(0,1fr));padding:17px;gap:15px 12px}.filter-heading {font-size:13px}
@@ -398,6 +406,15 @@ dialog::backdrop {background:#292a2d40}
 .run-case small,.run-model small,.run-outcome small {color:#7b7f86;font-size:13px;line-height:1.6}
 .run-row .mono,.run-model .mono {font-family:var(--sans);font-size:14px}
 .run-outcome .text-danger {color:#a75d65}
+.run-outcome .run-result-badge {display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 7px;border-radius:4px;background:#f2f4f6;color:#6f7987;font:400 12px/1.5 var(--sans);overflow-wrap:normal}
+.run-outcome .run-result-badge::before {content:'';width:5px;height:5px;flex:none;border-radius:50%;background:currentColor}
+.run-outcome .run-result-badge.is-missed {background:#fbf0f1;color:#a75d65}
+.run-outcome .run-result-badge.is-blocked {background:#edf5ee;color:#507d5d}
+.run-outcome .run-result-badge.is-pending {background:#edf4fc;color:#527da8}
+.run-outcome .run-result-badge.is-unknown {background:#f2f4f6;color:#747d89}
+.run-outcome .run-proof-link {display:inline-flex;align-items:center;gap:5px;max-width:100%;min-height:30px;margin-top:7px;padding:3px 0;border:0;background:transparent;color:#46759f;font:400 12px/1.45 var(--sans);text-align:left;white-space:normal;text-decoration:none}
+.run-outcome .run-proof-link:hover {color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.run-outcome .run-proof-link:focus-visible {border-radius:2px}
 .run-status .pill {font-family:var(--sans);font-size:12px;padding:5px 8px}
 .run-status .pill.teal {background:#edf5ee;color:#658b6c}
 .run-status .pill.orange {background:#faf5e8;color:#a28a4e}
@@ -460,11 +477,17 @@ dialog::backdrop {background:#292a2d40}
 /* Filters remain one compact control until opened on a phone. */
 .filter-controls {display:block}
 .filter-heading .filters-toggle {display:none}
-@media(max-width:1000px) {
+@media(max-width:1250px) {
  .filter-panel {display:block}
  .filter-heading {margin-bottom:18px}
- .filter-controls {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px}
- .filter-controls .filter-field {margin:0}
+ .filter-controls {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;align-items:end}
+ .filter-controls .filter-field {display:flex;flex-direction:column;justify-content:flex-end;min-width:0;margin:0}
+ .filter-controls .filter-field>span {min-height:2.9em;margin-bottom:0}
+ .filter-controls .filter-field input,.filter-controls .filter-field select {flex:none}
+}
+@media(max-width:900px) {
+ .filter-controls {grid-template-columns:repeat(2,minmax(0,1fr))}
+ .filter-controls .filter-field>span {min-height:0}
 }
 @media(max-width:680px) {
  .filter-panel {padding:14px 17px}
