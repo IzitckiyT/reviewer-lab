@@ -1,5 +1,8 @@
 # Запуск Reviewer Lab
 
+[Полное описание проекта и интерфейса](PROJECT_OVERVIEW.md) ·
+[Пошаговая инструкция](USER_GUIDE.md).
+
 ## Запустить эксперимент
 
 Нужен Python 3.10+. На macOS дважды нажмите **Start Experiment.command**.

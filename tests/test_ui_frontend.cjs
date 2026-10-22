@@ -176,13 +176,29 @@ test('closing scenario while local replay is pending discards late response', as
 });
 
 test('unsaved manual local result supports drilldown without changing editor contents', async () => {
-  const h=harness({allowPost:true,respond:async()=>({case:'owner',index:0,input_values:['editor',true],expected:false,actual:true,events:[]})});
-  const row=attempt({id:'local-preview',mode:'manual'});
-  h.run("state.view='manual';state.manual.preview=row;state.manual.source='EDITED_DRAFT'",{row});
-  await h.click({action:'open-scenario',scenarioRun:'manual-preview',scenarioAttempt:'local-preview',scenarioCase:'owner',scenarioIndex:'0'});
-  assert.equal(h.node('#scenario-dialog').open,true);
-  assert.equal(h.run('state.manual.source'),'EDITED_DRAFT');
-  assert.deepEqual(h.requests,['/api/explain-scenario']);
+  for (const savedSeries of [null, {...detail, rows:[attempt({source:'SAVED_SERIES_SOURCE'})]}]) {
+    const row=attempt({id:'local-preview',mode:'manual',outcome:'demo_check',reviewer:{verdict:'NOT_CALLED'},source:'LOCAL_PREVIEW_SOURCE'});
+    const h=harness({allowPost:true,respond:async(url,options)=>{
+      assert.equal(url,'/api/explain-scenario');
+      assert.deepEqual(JSON.parse(options.body),{case:'owner',source:row.source,index:0});
+      return {case:'owner',index:0,input_values:['editor',true],expected:false,actual:true,events:[]};
+    }});
+    h.run("state.view='manual';state.manual.preview=row;state.manual.source='EDITED_DRAFT';state.manual.runId=data?.id||null",{row,data:savedSeries});
+    if(savedSeries)h.run('state.details.set(data.id,data)');
+    const markup=h.run('manualResultMarkup(data,row)');
+    const button=markup.match(/<button\b[^>]*data-action="open-scenario"[^>]*>/)?.[0];
+    assert.ok(button,'The actual local result table must render a scenario button');
+    const dataset=Object.fromEntries([...button.matchAll(/data-([\w-]+)="([^"]*)"/g)].map(([,key,value])=>[key.replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase()),value]));
+    assert.equal(dataset.scenarioRun,'manual-preview','A local preview must not use a saved series context');
+    assert.equal(dataset.scenarioAttempt,'local-preview');
+    await h.click(dataset);
+    assert.equal(h.node('#scenario-dialog').open,true);
+    assert.match(h.node('#scenario-body').innerHTML,/Код разрешил запрещённое действие/);
+    assert.match(h.node('#scenario-body').innerHTML,/Решения ревьюера для патча нет/);
+    assert.equal(h.run('state.manual.source'),'EDITED_DRAFT');
+    assert.equal(h.run('state.manual.runId'),savedSeries?.id||null);
+    assert.deepEqual(h.requests,['/api/explain-scenario']);
+  }
 });
 
 test('quick start has one launch action and an offline example without disclosing evidence', () => {
