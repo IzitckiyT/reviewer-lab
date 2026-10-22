@@ -5,7 +5,7 @@ const number = v => new Intl.NumberFormat('ru-RU').format(v || 0);
 const json = v => JSON.stringify(v, null, 2);
 const pythonValue = v => v === true ? 'True' : v === false ? 'False' : JSON.stringify(v);
 const state = {data:null, view:'runs', run:null, runOpen:false, attempt:null, details:new Map(), demoRun:null,
-  demoAttempt:null, stage:0, demoMode:'welcome', playing:false, timer:null, tab:'snippet', inspectorTab:'source', trace:null, runQuery:'', runFilter:'all', runCase:'all', runStatus:'all', runEffort:'all', filtersExpanded:false, attemptOpen:false, attemptQuery:'', attemptFilter:'all', attemptSort:'original', launchPending:false,
+  demoAttempt:null, stage:0, demoMode:'welcome', playing:false, timer:null, tab:'snippet', inspectorTab:'source', attemptPanels:new Map(), panelSelectionRun:null, trace:null, runQuery:'', runFilter:'all', runCase:'all', runStatus:'all', runEffort:'all', filtersExpanded:false, attemptOpen:false, attemptQuery:'', attemptFilter:'all', attemptSort:'original', launchPending:false,
   providerId:null,reviewerModels:{},attackerModels:{},launchCase:'owner',launchDraft:null,taskId:null,casePicker:null,casePickerTask:null,exampleAttempt:null,historyExample:null,codeInspection:null,manualRequestPending:false,manual:{caseId:'owner',source:null,runId:null,selected:null,pending:false,error:'',loadedRun:null}};
 const replicationIds = ['replication-collision-low-2026-10-19','replication-collision-medium-2026-10-19'];
 let toastTimer, scenarioRequest = 0;
@@ -336,14 +336,17 @@ function collision(row) {
   const [owner,editor]=proof.arithmetic_trace;
   return `<div class="collision"><h3>Разные роли. Одинаковый отпечаток.</h3><p class="explain">Код сравнивает вычисленные числа вместо названий ролей.</p><div class="collision-lanes"><div class="collision-pair"><div class="collision-value">owner<b>${owner.handle}</b></div><div class="collision-value">editor<b>${editor.handle}</b></div></div><div class="collision-arrow">→</div><div class="collision-pair"><div class="collision-value">packed · owner<b>${owner.packed}</b></div><div class="collision-value">packed · editor<b>${editor.packed}</b></div></div><div class="collision-arrow">→</div><div class="collision-value collision-join">Один отпечаток<b>${owner.identity}</b></div></div><p class="explain"><code class="inline-code">(left * right + 197) % 997</code><br>Для owner и editor эта строка возвращает 427. Все следующие преобразования одинаковы: в конце обе роли получают 830.</p><p class="explain footer-note">Проверка уникальности исходных номеров не замечает совпадение после преобразования. Поэтому <code>same_role("editor", "owner")</code> возвращает <code>True</code>.</p></div>`;
 }
-function inspector(d,row,tab,stage=4) {
+function inspector(d,row,tab,stage=4,options={}) {
   const c=displayCase(d,row);
   const hidden=stage===0;
   if(stage<2&&['tests','explain'].includes(tab))tab='snippet';
   const tabs=[['snippet','Фрагмент'],['source','Весь код'],['diff','Diff'],['tests','Поведение кода'],['explain','Где ошибка']];
-  const diff=row.diff?`<div class="code-box"><pre aria-label="Изменения кода">${row.diff.trimEnd().split('\n').map(line=>`<span class="code-line diff-line ${line.startsWith('+')?'added':line.startsWith('-')?'removed':line.startsWith('@@')?'diff-header':''}">${esc(line)}</span>`).join('')}</pre></div>`:'<div class="empty">Для этой попытки diff пока недоступен.</div>';
+  const comparison=LabAttackStory.comparison(d,row,state.view==='demo'?'original':options.diffBase||'auto');
+  const scope=state.view==='runs'?`data-inspector-run="${esc(d.id)}" data-inspector-attempt="${esc(row.id)}"`:'';
+  const basePicker=comparison.hasPrevious&&state.view==='runs'?`<label>Сравнить с<select data-diff-run="${esc(d.id)}" data-diff-attempt="${esc(row.id)}" aria-label="Основа сравнения · ${esc(attemptLabel(row))}"><option value="previous" ${comparison.base==='previous'?'selected':''}>Предыдущей попыткой</option><option value="original" ${comparison.base==='original'?'selected':''}>Исходным кодом</option></select></label>`:'';
+  const diff=`<div class="diff-base-picker">${basePicker}<p>${esc(comparison.label)}</p></div>`+(comparison.text===null?'<div class="empty">Код для сравнения пока недоступен.</div>':comparison.text===''?'<div class="empty">Изменений нет: код совпадает с выбранной версией.</div>':`<div class="code-box"><pre aria-label="Изменения кода">${comparison.text.trimEnd().split('\n').map(line=>`<span class="code-line diff-line ${line.startsWith('+++')||line.startsWith('---')||line.startsWith('@@')?'diff-header':line.startsWith('+')?'added':line.startsWith('-')?'removed':''}">${esc(line)}</span>`).join('')}</pre></div>`);
   const content=hidden?codeView(c.original):tab==='tests'?testTable(row,d.id):tab==='explain'?collision(row):tab==='diff'?diff:row.source?codeView(row.source,tab==='snippet'):'<div class="empty">Атакующий ещё не вернул код кандидата.</div>';
-  return `<section class="card inspector-card"><div class="card-header"><span class="mono file-label">${hidden?'original.py':tab==='diff'?'candidate.diff':'candidate.py'}</span></div>${hidden?'':`<div class="tabs" role="tablist" aria-label="Разбор кандидата">${tabs.map(([id,label])=>`<button role="tab" aria-selected="${id===tab}" class="tab ${id===tab?'active':''}" data-tab="${id}" ${stage<2&&['tests','explain'].includes(id)?'disabled':''}>${label}</button>`).join('')}</div>`}${content}</section>`;
+  return `<section class="card inspector-card"><div class="card-header"><span class="mono file-label">${hidden?'original.py':tab==='diff'?'candidate.diff':'candidate.py'}</span></div>${hidden?'':`<div class="tabs" role="tablist" aria-label="Разбор кандидата">${tabs.map(([id,label])=>`<button role="tab" aria-selected="${id===tab}" class="tab ${id===tab?'active':''}" data-tab="${id}" ${scope} ${stage<2&&['tests','explain'].includes(id)?'disabled':''}>${label}</button>`).join('')}</div>`}${content}</section>`;
 }
 function finding(row,stage=4) {
   const c=state.data.cases.find(c=>c.id===row.case);
@@ -570,23 +573,41 @@ function visibleAttempts(d) {
   });
   return state.attemptSort==='newest'?rows.reverse():rows;
 }
+function attemptPanelKey(runId,attemptId) {return JSON.stringify([runId,attemptId]);}
+function attemptPanel(d,row) {
+  const saved=state.attemptPanels.get(attemptPanelKey(d.id,row.id));
+  const legacy=state.attemptOpen&&state.attempt===row.id&&(!state.panelSelectionRun||state.panelSelectionRun===d.id);
+  return saved||{open:!!legacy,tab:legacy?state.inspectorTab:'source',diffBase:'auto',codeTab:legacy&&['snippet','source','diff','explain'].includes(state.inspectorTab)?state.inspectorTab:'source'};
+}
+function rememberCurrentPanel(d) {
+  const row=d?.rows?.find(item=>item.id===state.attempt);
+  if(row&&attemptPanel(d,row).open&&!state.attemptPanels.has(attemptPanelKey(d.id,row.id)))state.attemptPanels.set(attemptPanelKey(d.id,row.id),{...attemptPanel(d,row)});
+}
+function updateAttemptPanel(d,row,changes) {
+  rememberCurrentPanel(d);
+  const panel={...attemptPanel(d,row),...changes};
+  state.attemptPanels.set(attemptPanelKey(d.id,row.id),panel);
+  state.attempt=row.id;state.attemptOpen=panel.open;state.inspectorTab=panel.tab;state.panelSelectionRun=d.id;
+  return panel;
+}
+
 function resetAttemptBrowser() {
-  state.exampleAttempt=null;state.historyExample=null;state.codeInspection=null;
+  state.exampleAttempt=null;state.historyExample=null;state.codeInspection=null;state.attemptPanels.clear();state.panelSelectionRun=null;
   state.attempt=null;state.attemptOpen=false;state.attemptQuery='';state.attemptFilter='all';state.attemptSort='original';state.inspectorTab='source';
 }
 function attemptRecords(d) {
   const rows=visibleAttempts(d);
   if(!rows.length)return `<div class="empty attempt-empty">${d.rows?.length?'Нет попыток по выбранным фильтрам. <button class="text-button" data-action="reset-attempt-filters">Сбросить фильтры</button>':'Здесь появятся попытки и контрольные проверки.'}</div>`;
   return rows.map(row=>{
-    const [result,tone]=outcome(row),test=oracleState(row),open=state.attemptOpen&&state.attempt===row.id;
+    const [result,tone]=outcome(row),test=oracleState(row),panel=attemptPanel(d,row),open=panel.open;
     const mode=row.stage==='control'?'Контроль':row.mode==='feedback'?'С обратной связью':row.mode==='independent'?'Независимая попытка':row.mode||'Проверка кандидата';
     const raw=row.reviewer?.verdict,model=row.outcome==='running'?pendingLabel(row):['PASS','BLOCK'].includes(raw)?raw:raw==='NOT_CALLED'?'Не вызван':raw==='ERROR'||row.outcome==='infrastructure_error'?'Ошибка':'Ожидание';
     const caseName=d.cases?.find(c=>c.id===row.case)?.title||row.case;
     const hash=row.source_sha256?`<span class="attempt-source">Кандидат <code title="${esc(row.source_sha256)}">${esc(row.source_sha256.slice(0,12))}</code></span>`:'';
-    const activeTab=state.inspectorTab==='reviewer'?'reviewer':state.inspectorTab==='tests'?'tests':'source';
+    const activeTab=panel.tab==='reviewer'?'reviewer':panel.tab==='tests'?'tests':'source';
     const actions=[['source','Код и diff'],['tests','Проверка'],['reviewer','Ответ модели']].map(([tab,label])=>`<button class="button attempt-action ${open&&activeTab===tab?'active':''}" data-attempt="${esc(row.id)}" data-open-tab="${tab}" aria-expanded="${open&&activeTab===tab}">${label}</button>`).join('');
-    const content=!open?'':state.inspectorTab==='reviewer'?`<div class="attempt-expanded"><div class="attempt-answer">${verdict(d,row)}</div></div>`:`<div class="attempt-expanded"><div class="attempt-detail-layout"><div class="evidence-main">${inspector(d,row,state.inspectorTab)}</div><aside class="decision-panel" aria-label="Результат попытки">${minimalResult(row)+answerDisclosure(d,row)}</aside></div></div>`;
-    return `<article class="attempt-record ${open?'expanded':''}" data-record-id="${esc(row.id)}" aria-label="${esc(attemptLabel(row))}"><div class="attempt-status"><strong class="${tone}">${esc(result)}</strong><span class="attempt-verdict">${esc(model)}</span><small>ревьюер</small></div><div class="attempt-summary"><div class="attempt-title-line"><h3>${esc(attemptLabel(row))}</h3><span>${esc(mode)}</span></div><p class="attempt-case">${esc(caseName)}</p><div class="attempt-facts"><span>Правило в коде: <b class="${test.tone==='danger'?'text-danger':''}">${esc(test.label)}</b></span>${hash}${row.started_at?`<span>Начало: ${esc(runDate(row.started_at))} МСК</span>`:''}</div><div class="attempt-actions">${actions}${row.reviewer_call?`<button class="text-button" data-trace="${esc(row.reviewer_call)}" data-trace-run="${esc(d.id)}">Трасса ↗</button>`:''}</div></div>${content}</article>`;
+    const content=!open?'':panel.tab==='reviewer'?`<div class="attempt-expanded"><div class="attempt-answer">${verdict(d,row)}</div></div>`:`<div class="attempt-expanded"><div class="attempt-detail-layout"><div class="evidence-main">${inspector(d,row,panel.tab,4,{diffBase:panel.diffBase})}</div><aside class="decision-panel" aria-label="Результат попытки">${minimalResult(row)+answerDisclosure(d,row)}</aside></div></div>`;
+    return `<article class="attempt-record ${open?'expanded':''}" data-record-id="${esc(row.id)}" aria-label="${esc(attemptLabel(row))}"><div class="attempt-status"><strong class="${tone}">${esc(result)}</strong><span class="attempt-verdict">${esc(model)}</span><small>ревьюер</small></div><div class="attempt-summary"><div class="attempt-title-line"><h3>${esc(attemptLabel(row))}</h3><span>${esc(mode)}</span></div><p class="attempt-case">${esc(caseName)}</p><div class="attempt-facts"><span>Правило в коде: <b class="${test.tone==='danger'?'text-danger':''}">${esc(test.label)}</b></span>${hash}${row.started_at?`<span>Начало: ${esc(runDate(row.started_at))} МСК</span>`:''}</div><div class="attempt-actions">${actions}${row.source?`<a class="text-button attempt-source-link" href="/api/runs/${encodeURIComponent(d.id)}/attempts/${encodeURIComponent(row.id)}/source" target="_blank" rel="noopener noreferrer">Открыть код ↗</a>`:''}${row.reviewer_call?`<button class="text-button" data-trace="${esc(row.reviewer_call)}" data-trace-run="${esc(d.id)}">Трасса ↗</button>`:''}</div></div>${content}</article>`;
   }).join('');
 }
 function renderAttemptRecords() {
@@ -1006,7 +1027,15 @@ document.addEventListener('click',async event=>{
     if(b.dataset.manualAttempt){selectManualAttempt(b.dataset.manualAttempt);return;}
     if(b.dataset.stage!==undefined){openGuideStage(Number(b.dataset.stage));return;}
     if(['all','missed','examples'].includes(b.dataset.filter)){state.runFilter=b.dataset.filter;state.runOpen=false;resetAttemptBrowser();navigate('runs');return;}
-    if(b.dataset.tab){if(state.view==='demo'){state.tab=b.dataset.tab;renderDemo();}else{state.inspectorTab=b.dataset.tab;renderAttemptRecords();}return;}
+    if(b.dataset.tab){
+      if(!['snippet','source','diff','tests','explain'].includes(b.dataset.tab))return;
+      if(state.view==='demo'){state.tab=b.dataset.tab;renderDemo();}
+      else if(state.view==='runs'&&state.runOpen){
+        const d=state.details.get(state.run),row=d?.rows?.find(item=>item.id===(b.dataset.inspectorAttempt||state.attempt));
+        if(!row||b.dataset.inspectorRun&&b.dataset.inspectorRun!==d.id)return;
+        updateAttemptPanel(d,row,{open:true,tab:b.dataset.tab,...(b.dataset.tab!=='tests'?{codeTab:b.dataset.tab}:{})});renderAttemptRecords();
+      }return;
+    }
     if(b.dataset.run){
       const selected=b.dataset.run,manual=state.data.runs.find(r=>r.id===selected)?.manifest.experiment_kind==='manual';
       if(manual){navigate('manual',selected);await detail(selected);if(state.view==='manual'&&state.manual.runId===selected)renderManual();}
@@ -1014,9 +1043,12 @@ document.addEventListener('click',async event=>{
       return;
     }
     if(b.dataset.attempt){
-      const tab=b.dataset.openTab||'source',activeTab=state.inspectorTab==='reviewer'?'reviewer':state.inspectorTab==='tests'?'tests':'source';
-      state.attemptOpen=!(state.attemptOpen&&state.attempt===b.dataset.attempt&&activeTab===tab);
-      state.attempt=b.dataset.attempt;state.inspectorTab=tab;renderAttemptRecords();return;
+      if(state.view!=='runs'||!state.runOpen)return;
+      const d=state.details.get(state.run),row=d?.rows?.find(item=>item.id===b.dataset.attempt);
+      const tab=b.dataset.openTab||'source';if(!row||!['source','tests','reviewer'].includes(tab))return;
+      rememberCurrentPanel(d);
+      const panel=attemptPanel(d,row),activeTab=panel.tab==='reviewer'?'reviewer':panel.tab==='tests'?'tests':'source';
+      updateAttemptPanel(d,row,{open:!(panel.open&&activeTab===tab),tab:tab==='source'?panel.codeTab||'source':tab});renderAttemptRecords();return;
     }
     if(b.dataset.demoRun){state.demoRun=b.dataset.demoRun;state.demoAttempt=b.dataset.demoAttempt;openGuideStage(3);return;}
     if(b.dataset.trace){await showTrace(b.dataset.traceRun,b.dataset.trace);return;}
@@ -1068,8 +1100,11 @@ document.addEventListener('click',async event=>{
     else if(action==='stop'){await api('/api/stop',{});toast('Остановка запрошена. Частичные результаты сохраняются.');await pollOnce();}
     else if(action==='trace-refresh'&&state.trace)await showTrace(state.trace.run,state.trace.call);
     else if(action==='replay') {
+      const run=state.view==='demo'?state.demoRun:b.dataset.replayRun;
+      const attempt=state.view==='demo'?state.demoAttempt:b.dataset.replayAttempt;
+      if(state.view!=='demo'&&(state.view!=='runs'||!state.runOpen||run!==state.run||!state.details.get(run)?.rows?.some(row=>row.id===attempt)))return;
       b.disabled=true;
-      const r=await api('/api/replay',{run:state.view==='demo'?state.demoRun:state.run,attempt:state.view==='demo'?state.demoAttempt:state.attempt});
+      const r=await api('/api/replay',{run,attempt});
       toast(r.target_regression?`Повторно вычислено ${r.rows.length} входов. Целевой дефект подтверждён.`:r.correct?'Повторная проверка: правило соблюдено.':'Проверка: '+r.reason); b.disabled=false;
     }
   } catch(error){toast(error.message);b.disabled=false;}
@@ -1083,6 +1118,11 @@ document.addEventListener('input',e=>{
   if(e.target.id==='attempt-search'){state.attemptQuery=e.target.value;renderAttemptRecords();}
 });
 document.addEventListener('change',e=>{
+  if(e.target.dataset?.diffAttempt){
+    if(state.view!=='runs'||!state.runOpen||e.target.dataset.diffRun!==state.run||!['previous','original'].includes(e.target.value))return;
+    const d=state.details.get(state.run),row=d?.rows?.find(item=>item.id===e.target.dataset.diffAttempt);if(!row)return;
+    updateAttemptPanel(d,row,{open:true,tab:'diff',codeTab:'diff',diffBase:e.target.value});renderAttemptRecords();return;
+  }
   if(e.target.id==='attacker-model'){updateAttackerChoice(e.target.value);updateForm();return;}
   if(['reviewer-model','manual-reviewer-model'].includes(e.target.id)){
     const context=e.target.id.startsWith('manual')?'manual':'launch';

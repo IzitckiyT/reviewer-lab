@@ -42,6 +42,188 @@ test('line diff reconstructs both actual versions, including duplicate lines and
   }
 });
 
+function applyUnified(before, text) {
+  if (!text) return before;
+  const source = before === '' ? [] : before.replace(/\n$/, '').split('\n');
+  const output = [], entries = text.split('\n');
+  let cursor = 0, index = 2;
+  assert.match(entries[0], /^--- /);
+  assert.match(entries[1], /^\+\+\+ /);
+  while (index < entries.length) {
+    const hunk = /^@@ -(\d+),(\d+) \+(\d+),(\d+) @@$/.exec(entries[index++]);
+    assert.ok(hunk, 'Expected a real unified hunk with source positions');
+    const oldStart = Number(hunk[1]) - (Number(hunk[2]) ? 1 : 0);
+    output.push(...source.slice(cursor, oldStart));
+    cursor = oldStart;
+    let oldCount = 0, newCount = 0;
+    while (index < entries.length && !entries[index].startsWith('@@ ')) {
+      const line = entries[index++];
+      if (line[0] !== '+') {
+        assert.equal(source[cursor++], line.slice(1), 'Removed and context lines must equal the actual previous source');
+        oldCount++;
+      }
+      if (line[0] !== '-') { output.push(line.slice(1)); newCount++; }
+    }
+    assert.equal(oldCount, Number(hunk[2]));
+    assert.equal(newCount, Number(hunk[4]));
+  }
+  output.push(...source.slice(cursor));
+  return output.join('\n') + (output.length ? '\n' : '');
+}
+
+test('comparison selects the closest actual feedback version, even an invalid one, and is read-only', () => {
+  const first = row({id:'first', source:'def decision(role, approved):\n    return False\n'});
+  const previous = row({id:'previous-invalid', attempt:2, source:'def decision(role, approved):\n    return approved\n',
+    oracle:{status:'invalid',reason:'Value outside bounded data subset'}, reviewer:{verdict:'NOT_CALLED'}});
+  const current = row({id:'third', attempt:3, feedback_items:2});
+  const data = fixture([previous, current, first]);
+  const saved = JSON.stringify(data);
+  const result = story.comparison(data,current);
+  assert.equal(result.base,'previous');
+  assert.equal(result.hasPrevious,true);
+  assert.equal(result.previousAttemptId,'previous-invalid');
+  assert.equal(result.label,'Что поменялось после попытки 2');
+  assert.equal(result.before,previous.source);
+  assert.equal(result.after,current.source);
+  assert.equal(applyUnified(result.before,result.text),result.after);
+  assert.equal(JSON.stringify(data),saved);
+  const reference = story.comparison(data,current,'original');
+  assert.equal(reference.base,'original');
+  assert.equal(reference.hasPrevious,true);
+  assert.equal(reference.previousAttemptId,previous.id);
+  assert.equal(reference.before,original);
+  assert.equal(applyUnified(reference.before,reference.text),current.source);
+});
+
+test('comparison never borrows controls, cases, independent modes, repeats or screening candidates', () => {
+  const previous = row({id:'previous', source:'PRIOR_SOURCE\n'});
+  const current = row({id:'current', attempt:2});
+  const variants = [
+    [previous,{...current,case:'audit'}], [{...previous,stage:'control'},current],
+    [previous,{...current,stage:'control'}], [previous,{...current,mode:'independent'}],
+    [{...previous,mode:'independent'},current], [previous,{...current,repeat:2}],
+    [{...previous,repeat:undefined},{...current,repeat:undefined}],
+    [{...previous,repeat:'1'},{...current,repeat:'1'}],
+    [{...previous,repeat:1.5},{...current,repeat:1.5}],
+    [{...previous,repeat:0},{...current,repeat:0}],
+    [{...previous,attempt:2},current], [previous,{...current,attempt:'2'}],
+  ];
+  for (const [left,right] of variants) {
+    const result=story.comparison(fixture([left,right]),right);
+    assert.equal(result.base,'original');
+    assert.equal(result.hasPrevious,false);
+    assert.equal(result.previousAttemptId,null);
+    assert.notEqual(result.before,'PRIOR_SOURCE\n');
+  }
+  const screening=fixture([previous,current]);
+  screening.manifest.experiment_kind='candidate_screen';
+  assert.equal(story.comparison(screening,current).hasPrevious,false);
+  assert.equal(story.comparison(screening,current,'previous').base,'original');
+});
+
+test('manual comparisons use only earlier saved human versions of the same case', () => {
+  const first=row({mode:'manual',repeat:undefined,source:original});
+  const current=row({id:'second',mode:'manual',repeat:undefined,attempt:2});
+  const data=fixture([first,current]);data.manifest.experiment_kind='manual';
+  const result=story.comparison(data,current);
+  assert.equal(result.base,'previous');
+  assert.equal(result.before,original);
+  assert.equal(applyUnified(result.before,result.text),current.source);
+  assert.equal(story.comparison(data,{...current,case:'audit'}).hasPrevious,false);
+  assert.equal(story.comparison(data,{...current,mode:'feedback'}).hasPrevious,false);
+});
+
+test('comparison diffs reconstruct exact versions across several hunks, insertion, deletion and Unicode', () => {
+  const long=Array.from({length:35},(_,index)=>`unchanged ${index}`).join('\n')+'\n';
+  const pairs=[
+    ['before\n','after\n'], ['same\nbefore\n','same\nafter\n'],
+    [long,`added\n${long}ещё строка\n`],
+    [`removed\n${long}последняя\n`,long],
+    [`head\n${long}old\n`,`HEAD\n${long}new\n`],
+    ['a\na\nb\n','a\nb\na\n'], ['return "Привет"\n','return "Пока"\n'],
+  ];
+  for(const [before,after] of pairs) {
+    const previous=row({id:'previous',source:before}),current=row({id:'current',attempt:2,source:after});
+    const result=story.comparison(fixture([previous,current]),current);
+    assert.equal(result.before,before);assert.equal(result.after,after);
+    assert.equal(applyUnified(result.before,result.text),after);
+    const changes=story.diff(result.before,result.after);
+    assert.deepEqual(Array.from(changes.filter(line=>line.kind!=='add'),line=>line.text),before.replace(/\n$/,'').split('\n'));
+    assert.deepEqual(Array.from(changes.filter(line=>line.kind!=='remove'),line=>line.text),after.replace(/\n$/,'').split('\n'));
+  }
+});
+
+test('equal consecutive versions contain no invented changes, even with a stale saved original diff', () => {
+  const previous=row({id:'previous'}),current=row({id:'current',attempt:2,diff:'--- original.py\n+++ candidate.py\n-invented\n+changes'});
+  const data=fixture([previous,current]);
+  const result=story.comparison(data,current);
+  assert.equal(result.base,'previous');assert.equal(result.text,'');
+  assert.equal(result.before,result.after);
+  const html=story.render(data,{attemptId:current.id});
+  const selected=html.slice(html.indexOf('data-story-attempt="current"'));
+  const primary=selected.slice(0,selected.indexOf('class="attack-story-original"'));
+  assert.match(primary,/Код совпадает с этой версией/);
+  assert.doesNotMatch(primary,/attack-diff-add|attack-diff-remove|invented/);
+  assert.match(primary,/\+0 \/ −0 строк к предыдущей попытке/);
+});
+
+test('bounded multiplication repair highlights advance without repainting unchanged role_signature', () => {
+  const stable='\n\ndef role_signature(role):\n    size = len(role)\n    if size not in (5, 6):\n        return (0, 0)\n    return role\n\n\ndef decision(role, approved):\n    return approved is True and role_signature(role) == role_signature("owner")\n';
+  const before='def advance(state, value):\n    # Generated discriminator constants; retain both residue lanes.\n    return (\n        (state[0] * 31 + value) % 194393,\n        (state[1] * 7 + value) % 26593\n    )\n'+stable;
+  const after='def advance(state, value):\n    """Maintain both residue lanes with bounded intermediate values."""\n    modulus = 194393\n    base = state[0]\n    scaled = (base * 5) % modulus\n    scaled = (scaled * 5) % modulus\n    remainder = (base * 3) % modulus\n    remainder = (remainder * 2) % modulus\n    return (\n        (scaled + remainder + value) % modulus,\n        (state[1] * 7 + value) % 26593\n    )\n'+stable;
+  const previous=row({id:'previous',source:before,oracle:{status:'invalid'},reviewer:{verdict:'NOT_CALLED'}});
+  const current=row({id:'current',attempt:2,feedback_items:1,source:after,diff:'SAVED_ORIGINAL_DIFF_MUST_NOT_WIN'});
+  const data=fixture([previous,current]),result=story.comparison(data,current);
+  assert.equal(result.base,'previous');
+  assert.match(result.text,/^-        \(state\[0\] \* 31 \+ value\) % 194393,$/m);
+  assert.match(result.text,/^\+    scaled = \(base \* 5\) % modulus$/m);
+  assert.match(result.text,/^\+    remainder = \(remainder \* 2\) % modulus$/m);
+  assert.match(result.text,/^ def role_signature\(role\):$/m);
+  assert.doesNotMatch(result.text,/^[+-]def role_signature|SAVED_ORIGINAL_DIFF/m);
+  assert.equal(applyUnified(result.before,result.text),after);
+  const html=story.render(data,{attemptId:current.id});
+  const selected=html.slice(html.indexOf('data-story-attempt="current"'));
+  assert.ok(selected.indexOf('Что поменялось после попытки 1')<selected.indexOf('Сравнить с исходной правильной версией'));
+  assert.match(selected,/attack-diff-context[^>]*> def role_signature/);
+});
+
+test('line ending changes are reported without inventing changed code lines', () => {
+  const previous=row({id:'previous',source:bad});
+  const current=row({id:'current',attempt:2,source:bad.replace(/\n$/,'')});
+  const result=story.comparison(fixture([previous,current]),current);
+  assert.equal(result.before,bad);assert.equal(result.after,current.source);
+  assert.match(result.text,/Изменился перевод строки в конце файла/);
+  assert.doesNotMatch(result.text,/^[+-]/m);
+});
+
+test('missing original sources fall back honestly and explicit previous cannot invent a chain', () => {
+  const current=row({source:''});
+  const result=story.comparison(fixture([current]),current,'previous');
+  assert.equal(result.base,'original');assert.equal(result.hasPrevious,false);
+  assert.equal(result.previousAttemptId,null);assert.equal(result.after,null);
+  assert.equal(result.text,null);
+  const sourceOnly=story.comparison({manifest:{},rows:[row()],cases:[]},row());
+  assert.equal(sourceOnly.before,null);assert.equal(sourceOnly.after,bad);assert.equal(sourceOnly.text,null);
+  const insertion=fixture();insertion.cases[0].original='';
+  const added=story.comparison(insertion,insertion.rows[0]);
+  assert.match(added.text,/@@ -0,0 \+1,2 @@/);
+  assert.equal(applyUnified(added.before,added.text),bad);
+});
+
+test('the complete source opens through an escaped inline URL in a separate tab without downloading', () => {
+  const candidate=row({id:'owner-feedback-r1-a2"&/?.py'});
+  const data=fixture([candidate]);data.id='run"&/?.id';
+  const html=story.render(data);
+  const anchor=html.match(/<a\b[^>]*>Открыть код ↗<\/a>/)?.[0];
+  assert.ok(anchor);
+  assert.match(anchor,/target="_blank"/);
+  assert.match(anchor,/rel="noopener noreferrer"/);
+  assert.ok(anchor.includes(`href="/api/runs/${encodeURIComponent(data.id)}/attempts/${encodeURIComponent(candidate.id)}/source"`));
+  assert.doesNotMatch(anchor,/\bdownload(?:\s|=|>)/);
+  assert.doesNotMatch(anchor,/href="[^\"]*"&|onclick=/);
+  assert.doesNotMatch(story.render(fixture([row({source:''})])),/>Открыть код ↗<\/a>/);
+});
+
 test('history explains the goal and shows the actual additions and removals', () => {
   const html = story.render(fixture());
   assert.match(html, /Что делал атакующий/);

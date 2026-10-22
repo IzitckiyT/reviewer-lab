@@ -30,6 +30,29 @@ test('all saved scenarios have keyboard accessible drilldown with exact attempt 
   assert.doesNotMatch(html,/def decision/);
 });
 
+test('each replay button retains its own escaped run and attempt without a global selection', () => {
+  const {ui}=view();
+  const candidate={id:'attempt"<&two',case:'owner',oracle:{status:'evaluated',rows:[]}};
+  const html=ui.table(candidate,{runId:'run"<&two'});
+  const replay=html.match(/<button\b[^>]*data-action="replay"[^>]*>/)?.[0];
+  assert.ok(replay);
+  assert.match(replay,/data-replay-run="run&quot;&lt;&amp;two"/);
+  assert.match(replay,/data-replay-attempt="attempt&quot;&lt;&amp;two"/);
+  assert.doesNotMatch(replay,/<&|data-replay-run="run"/);
+  const other=ui.table({...candidate,id:'other-attempt'},{runId:'other-run'});
+  assert.match(other,/data-replay-run="other-run" data-replay-attempt="other-attempt"/);
+  assert.doesNotMatch(other,/attempt&quot;|run&quot;/);
+});
+
+test('replay without a saved run keeps the demonstration fallback and disabled replay has no button', () => {
+  const {ui}=view();
+  const candidate={id:'attempt',case:'owner',oracle:{status:'evaluated',rows:[]}};
+  const html=ui.table(candidate);
+  assert.match(html,/data-action="replay"/);
+  assert.doesNotMatch(html,/data-replay-run|data-replay-attempt/);
+  assert.doesNotMatch(ui.table(candidate,{replay:false,runId:'run'}),/data-action="replay"/);
+});
+
 test('every known case explains its violation without requiring Python values', () => {
   const {copy, ui} = view();
   for (const id of caseIds) {

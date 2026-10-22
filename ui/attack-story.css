@@ -56,9 +56,9 @@
 .attack-diff-remove {color:#a25f69;background:#fbf0f1}
 .attack-diff-file,.attack-diff-hunk {color:#8a95a6}
 .attack-diff-context {color:#738094}
-.attack-story-previous,.attack-story-source,.attack-story-answer {margin-top:15px;font-size:12px}
-.attack-story-previous>summary,.attack-story-source>summary,.attack-story-answer>summary {cursor:pointer;color:#718198;font-size:11px}
-.attack-story-previous[open]>summary,.attack-story-source[open]>summary,.attack-story-answer[open]>summary {margin-bottom:11px}
+.attack-story-previous,.attack-story-original,.attack-story-source,.attack-story-answer {margin-top:15px;font-size:12px}
+.attack-story-previous>summary,.attack-story-original>summary,.attack-story-source>summary,.attack-story-answer>summary {cursor:pointer;color:#718198;font-size:11px}
+.attack-story-previous[open]>summary,.attack-story-original[open]>summary,.attack-story-source[open]>summary,.attack-story-answer[open]>summary {margin-bottom:11px}
 .attack-story-code {max-height:330px;overflow:auto;margin:0;padding:16px;background:#f7f8fa;border-radius:5px;font:11px/1.8 var(--mono);white-space:pre}
 .attack-story-result {margin-top:23px;padding-top:20px;border-top:1px solid var(--line)}
 .attack-story-result>p {margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.85}

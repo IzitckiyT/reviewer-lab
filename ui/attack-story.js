@@ -65,23 +65,36 @@
     return result;
   }
 
-  function diffText(before, after) {
+  function diffText(before, after, {context = 3, filename = 'original.py'} = {}) {
     if (before === after) return '';
     const changes = diff(before, after);
     if (!changes.some(line => line.kind !== 'context')) return '\\ Изменился перевод строки в конце файла';
     const visible = new Set();
     changes.forEach((line, index) => {
-      if (line.kind !== 'context') for (let i = Math.max(0, index - 3); i <= Math.min(changes.length - 1, index + 3); i++) visible.add(i);
+      if (line.kind !== 'context') for (let i = Math.max(0, index - context); i <= Math.min(changes.length - 1, index + context); i++) visible.add(i);
     });
-    let previous = -2;
-    return changes.flatMap((line, index) => {
-      if (!visible.has(index)) return [];
-      const block = [];
-      if (index > previous + 1) block.push('@@ … @@');
-      block.push((line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ') + line.text);
-      previous = index;
-      return block;
-    }).join('\n');
+    let oldLine = 1, newLine = 1;
+    const positions = changes.map(line => {
+      const position = {oldLine, newLine};
+      if (line.kind !== 'add') oldLine++;
+      if (line.kind !== 'remove') newLine++;
+      return position;
+    });
+    const result = [`--- ${filename}`, '+++ candidate.py'];
+    for (let start = 0; start < changes.length;) {
+      if (!visible.has(start)) { start++; continue; }
+      let end = start + 1;
+      while (end < changes.length && visible.has(end)) end++;
+      const block = changes.slice(start, end);
+      const oldCount = block.filter(line => line.kind !== 'add').length;
+      const newCount = block.filter(line => line.kind !== 'remove').length;
+      const oldStart = positions[start].oldLine - (oldCount ? 0 : 1);
+      const newStart = positions[start].newLine - (newCount ? 0 : 1);
+      result.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+      result.push(...block.map(line => (line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ') + line.text));
+      start = end;
+    }
+    return result.join('\n');
   }
 
   function diffMarkup(text) {
@@ -104,16 +117,38 @@
   }
 
   function sameChain(left, right, manual) {
-    if (!left || !right || left.case !== right.case) return false;
+    if (!left || !right || left.stage !== 'search' || right.stage !== 'search' ||
+        typeof left.case !== 'string' || !left.case || left.case !== right.case) return false;
     if (manual) return left.mode === 'manual' && right.mode === 'manual';
     return left.mode === 'feedback' && right.mode === 'feedback' &&
-      left.repeat !== undefined && left.repeat === right.repeat;
+      Number.isSafeInteger(left.repeat) && left.repeat > 0 && left.repeat === right.repeat;
   }
 
   function previousCandidate(rows, row, manual) {
-    if (!Number.isInteger(row.attempt)) return null;
-    return rows.filter(item => sameChain(item, row, manual) && Number.isInteger(item.attempt) && item.attempt < row.attempt)
+    if (!Number.isSafeInteger(row?.attempt) || row.attempt < 1) return null;
+    return rows.filter(item => sameChain(item, row, manual) && hasSource(item) &&
+      typeof item.id === 'string' && item.id && Number.isSafeInteger(item.attempt) &&
+      item.attempt > 0 && item.attempt < row.attempt)
       .sort((a, b) => b.attempt - a.attempt)[0] || null;
+  }
+
+  function comparison(run, row, base = 'auto') {
+    const screen = run?.manifest?.experiment_kind === 'candidate_screen';
+    const manual = run?.manifest?.experiment_kind === 'manual';
+    const previous = screen ? null : previousCandidate(list(run?.rows), row, manual);
+    const savedCase = list(run?.cases).find(item => item?.id === row?.case);
+    const selected = base !== 'original' && previous ? 'previous' : 'original';
+    const before = selected === 'previous' ? previous.source
+      : typeof savedCase?.original === 'string' ? savedCase.original : null;
+    const after = hasSource(row) ? row.source : null;
+    const text = before !== null && after !== null ? diffText(before, after,
+      {context: selected === 'previous' ? 5 : 3, filename: selected === 'previous' ? 'previous.py' : 'original.py'})
+      : selected === 'original' && typeof row?.diff === 'string' && row.diff.length ? row.diff : null;
+    return {base: selected,
+      label: selected === 'previous' ? `Что поменялось после попытки ${previous.attempt}`
+        : 'Сравнение с исходной правильной версией',
+      previousAttemptId: previous?.id || null, hasPrevious: !!previous,
+      text, before, after};
   }
 
   // These descriptions refer only to the two immutable, published source snapshots.
@@ -254,17 +289,18 @@
   function iterationMarkup(run, rows, row, open, manual, screen) {
     const previous = screen ? null : previousCandidate(rows, row, manual);
     const savedCase = list(run.cases).find(item => item.id === row.case);
-    const original = typeof savedCase?.original === 'string' ? savedCase.original : null;
     const copy = root.LabCaseCopy?.has(row.case) ? root.LabCaseCopy.get(row.case) : null;
     const title = copy?.title || savedCase?.title || row.case || 'Задача не указана';
-    const originalDiff = typeof row.diff === 'string' && row.diff.length ? row.diff
-      : hasSource(row) && original !== null ? diffText(original, row.source) : null;
-    const previousDiff = previous && hasSource(previous) && hasSource(row) ? diffText(previous.source, row.source) : null;
-    const changes = hasSource(row) && original !== null ? diff(original, row.source) : null;
+    const selectedComparison = comparison(run, row);
+    const originalComparison = selectedComparison.hasPrevious ? comparison(run, row, 'original') : null;
+    const changes = selectedComparison.before !== null && selectedComparison.after !== null
+      ? diff(selectedComparison.before, selectedComparison.after) : null;
     const note = recordedNotes(row, previous);
-    const statistics = changes ? `+${changes.filter(line => line.kind === 'add').length} / −${changes.filter(line => line.kind === 'remove').length} строк к исходному коду` : 'Изменения из сохранённой попытки';
+    const statistics = changes ? `+${changes.filter(line => line.kind === 'add').length} / −${changes.filter(line => line.kind === 'remove').length} строк ${selectedComparison.base === 'previous' ? 'к предыдущей попытке' : 'к исходному коду'}` : 'Изменения из сохранённой попытки';
     const mode = screen ? 'Готовый код' : manual ? 'Ручная правка' : row.mode === 'feedback' ? 'С обратной связью' : row.mode === 'independent' ? 'Независимая' : 'Режим не указан';
-    return `<details class="attack-story-iteration ${victory(row) ? 'has-victory' : ''}" data-story-attempt="${escape(row.id)}" data-attack-key="iteration:${escape(row.id)}"${open ? ' open' : ''}><summary><span class="attack-story-number">${escape(row.attempt ?? '—')}</span><span class="attack-story-iteration-title"><strong>${screen ? 'Что изменено в проверяемом коде' : escape(title)}</strong><small>${escape(mode)}${row.repeat !== undefined ? ` · серия ${escape(row.repeat)}` : ''}</small></span><span class="attack-story-outcome">${escape(outcome(row))}</span><span class="attack-story-toggle" aria-hidden="true">+</span></summary><div class="attack-story-iteration-body">${screen ? '' : feedbackMarkup(row, previous, manual)}<section class="attack-story-change"><div class="attack-story-change-heading"><h3>${victory(row) ? 'Изменение, которое прошло ревью' : 'Что изменилось в коде'}</h3><span>${escape(statistics)}</span></div>${note ? `<p class="attack-story-change-note">${escape(note)}</p>` : ''}<p class="attack-story-diff-key"><span>− убрали</span><span>+ добавили</span><span>Сравнение с исходной правильной версией</span></p>${originalDiff !== null ? diffMarkup(originalDiff) : '<p class="attack-story-note">Код или сравнение ещё не сохранены.</p>'}${previousDiff !== null ? `<details class="attack-story-previous" data-attack-key="previous:${escape(row.id)}"><summary>Что поменялось после попытки ${escape(previous.attempt)}</summary><p class="attack-story-note">Сравниваем две сохранённые версии в одной серии${manual ? '.' : ' с обратной связью.'}</p>${diffMarkup(previousDiff)}</details>` : ''}${hasSource(row) ? `<details class="attack-story-source" data-attack-key="source:${escape(row.id)}"><summary>Код этой версии целиком</summary><pre class="attack-story-code"><code>${escape(row.source)}</code></pre></details>` : ''}</section>${resultMarkup(run, row)}${row.attacker_call && !screen && !manual ? `<button class="text-button attack-story-attacker-trace" data-trace="${escape(row.attacker_call)}" data-trace-run="${escape(run.id)}">Что получил и вернул атакующий ↗</button>` : ''}</div></details>`;
+    const sourceLink = hasSource(row) && typeof run.id === 'string' && typeof row.id === 'string'
+      ? `<a class="text-button" target="_blank" rel="noopener noreferrer" href="/api/runs/${escape(encodeURIComponent(run.id))}/attempts/${escape(encodeURIComponent(row.id))}/source">Открыть код ↗</a>` : '';
+    return `<details class="attack-story-iteration ${victory(row) ? 'has-victory' : ''}" data-story-attempt="${escape(row.id)}" data-attack-key="iteration:${escape(row.id)}"${open ? ' open' : ''}><summary><span class="attack-story-number">${escape(row.attempt ?? '—')}</span><span class="attack-story-iteration-title"><strong>${screen ? 'Что изменено в проверяемом коде' : escape(title)}</strong><small>${escape(mode)}${row.repeat !== undefined ? ` · серия ${escape(row.repeat)}` : ''}</small></span><span class="attack-story-outcome">${escape(outcome(row))}</span><span class="attack-story-toggle" aria-hidden="true">+</span></summary><div class="attack-story-iteration-body">${screen ? '' : feedbackMarkup(row, previous, manual)}<section class="attack-story-change"><div class="attack-story-change-heading"><h3>${victory(row) ? 'Изменение, которое прошло ревью' : 'Что изменилось в коде'}</h3><span>${escape(statistics)}</span></div>${note ? `<p class="attack-story-change-note">${escape(note)}</p>` : ''}<p class="attack-story-diff-key"><span>− убрали</span><span>+ добавили</span><span>${escape(selectedComparison.label)}</span></p>${selectedComparison.text !== null ? diffMarkup(selectedComparison.text) : '<p class="attack-story-note">Код или сравнение ещё не сохранены.</p>'}${originalComparison && originalComparison.text !== null ? `<details class="attack-story-original" data-attack-key="original:${escape(row.id)}"><summary>Сравнить с исходной правильной версией</summary><p class="attack-story-note">Все изменения этой версии относительно исходного правила.</p>${diffMarkup(originalComparison.text)}</details>` : ''}${sourceLink}${hasSource(row) ? `<details class="attack-story-source" data-attack-key="source:${escape(row.id)}"><summary>Код этой версии целиком</summary><pre class="attack-story-code"><code>${escape(row.source)}</code></pre></details>` : ''}</section>${resultMarkup(run, row)}${row.attacker_call && !screen && !manual ? `<button class="text-button attack-story-attacker-trace" data-trace="${escape(row.attacker_call)}" data-trace-run="${escape(run.id)}">Что получил и вернул атакующий ↗</button>` : ''}</div></details>`;
   }
 
   function render(run, {caseId, attemptId, collapseVersions = false} = {}) {
@@ -283,7 +319,7 @@
     return `<section class="attack-story" aria-label="${manual ? 'История ручных правок' : 'Как работал атакующий'}"><header class="attack-story-heading"><div><p class="attack-story-kicker">${manual ? 'Вы → код → ревьюер' : 'Атакующий → код с ошибкой → ревьюер'}</p><h2>${manual ? 'Как менялся ваш код' : 'Что делал атакующий'}</h2><p>${escape(introduction)}</p></div><span class="attack-story-count">${rows.length} ${plural(rows.length, 'версия', 'версии', 'версий')} · ${wins.length} ${plural(wins.length, 'обход', 'обхода', 'обходов')}</span></header>${plainSummary(run, rows, selected, {manual, screen: false})}${rows.length ? `<div class="attack-story-timeline">${rows.map(row => iterationMarkup(run, rows, row, row === expanded, manual, false)).join('')}</div>` : '<p class="attack-story-empty">Первая версия ещё не сохранена. Здесь появятся код, изменения и ответ ревьюера.</p>'}${!manual && rows.some(row => row.mode === 'independent') && rows.length > 1 ? '<p class="attack-story-limit">Независимые попытки и разные серии не продолжают друг друга. Их ответы ревьюера не передаются между сериями.</p>' : ''}</section>`;
   }
 
-  const api = Object.freeze({render, diff, victory, recordedNotes});
+  const api = Object.freeze({render, diff, comparison, victory, recordedNotes});
   root.LabAttackStory = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(globalThis);

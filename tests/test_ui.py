@@ -566,6 +566,75 @@ class HTTPTests(unittest.TestCase):
         after = {str(p): p.read_bytes() for p in Path(self.temp.name).rglob('*') if p.is_file()}
         self.assertEqual(before, after)
 
+    def test_saved_source_opens_exact_candidate_inline_in_demo_without_model_calls(self):
+        self.restart(read_only=True)
+        first = self.path / 'attempts' / self.row['id']
+        source = '# Кириллица и HTML остаются текстом: <script>alert(1)</script>\r\n' + CASES['owner'].seed
+        first.joinpath('candidate.py').write_bytes(source.encode('utf-8'))
+        second_id = 'owner-feedback-r1-a2'
+        second = self.path / 'attempts' / second_id
+        second.mkdir()
+        second_source = CASES['owner'].original
+        second.joinpath('candidate.py').write_bytes(second_source.encode('utf-8'))
+        write_json(second / 'result.json', {'id': second_id, 'source_sha256': digest(second_source)})
+        before = {str(p): p.read_bytes() for p in Path(self.temp.name).rglob('*') if p.is_file()}
+        with patch('lab.ui.create_transport') as transport, patch('lab.ui.subprocess.Popen') as popen:
+            for identity, expected in ((self.row['id'], source), (second_id, second_source)):
+                code, headers, body = self.request(f'/api/runs/test-run/attempts/{identity}/source')
+                self.assertEqual(code, 200)
+                self.assertEqual(body, expected.encode('utf-8'))
+                self.assertEqual(headers['Content-Type'], 'text/plain; charset=utf-8')
+                self.assertEqual(headers['Content-Length'], str(len(body)))
+                self.assertNotIn('Content-Disposition', headers)
+                self.assertEqual(headers['Cache-Control'], 'no-store')
+                self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
+                self.assertIn("frame-ancestors 'none'", headers['Content-Security-Policy'])
+            transport.assert_not_called()
+            popen.assert_not_called()
+        after = {str(p): p.read_bytes() for p in Path(self.temp.name).rglob('*') if p.is_file()}
+        self.assertEqual(before, after)
+
+    def test_saved_source_rejects_missing_wrong_identity_and_path_escape(self):
+        prefix = f'/api/runs/test-run/attempts/{self.row["id"]}'
+        paths = ['/api/runs/missing/attempts/' + self.row['id'] + '/source',
+                 '/api/runs/test-run/attempts/missing/source',
+                 '/api/runs/test-run/attempts/../source',
+                 '/api/runs/test-run/attempts/%2e%2e/source',
+                 '/api/runs/%2e%2e/attempts/' + self.row['id'] + '/source',
+                 prefix + '/../../source']
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(self.request(path)[0], 404)
+        folder = self.path / 'attempts' / self.row['id']
+        write_json(folder / 'result.json', {'id': 'different-attempt'})
+        self.assertEqual(self.request(prefix + '/source')[0], 404)
+        (folder / 'result.json').unlink()
+        (folder / 'candidate.py').unlink()
+        self.assertEqual(self.request(prefix + '/source')[0], 404)
+
+    def test_saved_source_rejects_oversize_invalid_encoding_changed_source_and_symlinks(self):
+        folder = self.path / 'attempts' / self.row['id']
+        candidate = folder / 'candidate.py'
+        endpoint = f'/api/runs/test-run/attempts/{self.row["id"]}/source'
+        for source in (b'x' * 20_001, b'\xff\xfe'):
+            candidate.write_bytes(source)
+            self.assertEqual(self.request(endpoint)[0], 404)
+        candidate.write_text(CASES['owner'].seed, encoding='utf-8')
+        write_json(folder / 'result.json', {'id': self.row['id'], 'source_sha256': '0' * 64})
+        self.assertEqual(self.request(endpoint)[0], 404)
+        (folder / 'result.json').unlink()
+        candidate.unlink()
+        candidate.symlink_to(self.path / 'manifest.json')
+        self.assertEqual(self.request(endpoint)[0], 404)
+        candidate.unlink()
+        candidate.write_text(CASES['owner'].seed, encoding='utf-8')
+        alias = self.path / 'attempts' / 'alias'
+        alias.symlink_to(folder, target_is_directory=True)
+        self.assertEqual(self.request('/api/runs/test-run/attempts/alias/source')[0], 404)
+        run_alias = self.path.parent / 'run-alias'
+        run_alias.symlink_to(self.path, target_is_directory=True)
+        self.assertEqual(self.request(f'/api/runs/run-alias/attempts/{self.row["id"]}/source')[0], 404)
+
     def test_external_port_mapping_uses_exact_host_origin_and_token(self):
         self.restart(bind='0.0.0.0', read_only=True,
                      public_origins=['http://localhost:9876', 'http://127.0.0.1:9876'])

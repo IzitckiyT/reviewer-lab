@@ -468,14 +468,15 @@ test('the example guide distinguishes stored model output from fixture data', ()
 
 test('diff rendering escapes source text and marks additions, removals and hunks', () => {
   const {run} = harness();
-  const row = attempt({diff: '@@ -1 +1 @@\n-<old>&"\n+<script>alert("x")</script>\n context'});
-  const markup = run('inspector(detail,row,"diff")', {detail, row});
+  const data = {...detail,cases:[{id:'owner',original:'<old>&"\n context\n'}]};
+  const row = attempt({source:'<script>alert("x")</script>\n context\n',diff:'FORGED_SAVED_DIFF'});
+  const markup = run('inspector(data,row,"diff")', {data, row});
   assert.match(markup, /candidate\.diff/);
-  assert.match(markup, /diff-line diff-header">@@ -1 \+1 @@/);
+  assert.match(markup, /diff-line diff-header">@@/);
   assert.match(markup, /diff-line removed">-&lt;old&gt;&amp;&quot;/);
   assert.match(markup, /diff-line added">\+&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
-  assert.doesNotMatch(markup, /<script>|<old>/);
-  assert.match(run('inspector(detail,row,"diff")', {row: attempt()}), /diff пока недоступен/);
+  assert.doesNotMatch(markup, /<script>|<old>|FORGED_SAVED_DIFF/);
+  assert.match(run('inspector(data,row,"diff")', {row: attempt({source:undefined})}), /Код для сравнения пока недоступен/);
 });
 
 test('runs is the default list, and cached selection does not reveal a detail screen', () => {
@@ -589,7 +590,14 @@ test('row drill-in and back use a read-only fixture and preserve list filters', 
   assert.doesNotMatch(h.node('#main').innerHTML, /CANDIDATE_ONLY/);
 });
 
-test('attempt details start closed and each action expands only its selected attempt', async () => {
+function attemptCardMarkup(markup,id) {
+  const escaped=id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const card=markup.match(new RegExp(`<article\\b[^>]*data-record-id="${escaped}"[^>]*>[^]*?<\\/article>`));
+  assert.ok(card,`Expected the attempt card ${id}`);
+  return card[0];
+}
+
+test('attempt details start closed and opening another attempt preserves the first expanded panel', async () => {
   const h = harness();
   const rows = [attempt(), attempt({id: 'second', attempt: 2, source: 'SECOND_SOURCE',
     reviewer: {verdict: 'BLOCK', reason: 'SECOND_REASON'}, success: false})];
@@ -607,12 +615,14 @@ test('attempt details start closed and each action expands only its selected att
   await h.click({attempt: rows[1].id, openTab: 'reviewer'});
   assert.equal(h.run('state.attempt'), 'second');
   const answer = h.node('#attempt-records').innerHTML;
-  assert.match(answer, /SECOND_REASON|Дословный ответ модели/);
-  assert.doesNotMatch(answer, /SAVED_REVIEWER_REASON|CANDIDATE_ONLY|SECOND_SOURCE/);
-  assert.equal((answer.match(/aria-expanded="true"/g) || []).length, 1);
+  assert.match(attemptCardMarkup(answer,rows[0].id),/class="scenario-table"/);
+  assert.match(attemptCardMarkup(answer,rows[1].id), /SECOND_REASON|Дословный ответ модели/);
+  assert.doesNotMatch(attemptCardMarkup(answer,rows[1].id), /SAVED_REVIEWER_REASON|CANDIDATE_ONLY|SECOND_SOURCE/);
+  assert.equal((answer.match(/aria-expanded="true"/g) || []).length, 2);
   await h.click({attempt: rows[1].id, openTab: 'reviewer'});
   assert.equal(h.run('state.attemptOpen'), false);
-  assert.doesNotMatch(h.node('#attempt-records').innerHTML, /SECOND_REASON|aria-expanded="true"/);
+  assert.doesNotMatch(attemptCardMarkup(h.node('#attempt-records').innerHTML,rows[1].id), /SECOND_REASON|aria-expanded="true"/);
+  assert.match(attemptCardMarkup(h.node('#attempt-records').innerHTML,rows[0].id),/class="scenario-table"|aria-expanded="true"/);
   assert.deepEqual(h.requests, []);
   assert.equal(data.rows.length, 2);
 });
@@ -2749,4 +2759,235 @@ test('a simple screening shows its concrete result and proof actions before expl
   assert.match(top,/data-scenario-attempt="exact-winning-attempt"[^>]*data-scenario-index="1"/);
   assert.doesNotMatch(top,/Атакующий создал|Генератор создал/);
   assert.deepEqual(h.requests,[]);
+});
+
+function parallelInspectorFixture() {
+  const original='def decision(role, approved):\n    return role == "owner" and approved\n';
+  const first=attempt({id:'parallel-1',mode:'feedback',feedback_items:0,attempt:1,source:'def decision(role, approved):\n    allowed = role in {"owner", "editor"}\n    return allowed and approved\n',reviewer:{verdict:'BLOCK',reason:'FIRST_PANEL_REASON'},success:false});
+  const second=attempt({id:'parallel-2',mode:'feedback',feedback_items:1,attempt:2,source:'def decision(role, approved):\n    allowed = role in {"owner", "editor"}\n    return approved and allowed\n',reviewer:{verdict:'BLOCK',reason:'SECOND_PANEL_REASON'},success:false});
+  const third=attempt({id:'parallel-3',mode:'feedback',feedback_items:2,attempt:3,source:'def decision(role, approved):\n    allowed = role in {"owner", "editor"}\n    result = approved and allowed\n    return result\n',reviewer:{verdict:'BLOCK',reason:'THIRD_PANEL_REASON'},success:false});
+  return {original,first,second,third};
+}
+
+function prepareParallelInspectors(h,rows=null) {
+  const fixture=parallelInspectorFixture();
+  const data=prepareRun(h,rows||[fixture.first,fixture.second],{experiment_kind:'attack_search',modes:['feedback'],attempts_per_run:3,repeats:1});
+  data.cases=[{id:'owner',title:'Кто может публиковать',original:fixture.original}];
+  h.run('renderRuns()');
+  return {...fixture,data};
+}
+
+test('two attempt inspectors keep independent inner tabs and a new panel never inherits the focused panel tab',async()=>{
+  const h=harness(),{data,first,second,third}=prepareParallelInspectors(h);
+  await h.click({attempt:first.id,openTab:'source'});
+  const firstSource=attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id);
+  await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:first.id});
+  await h.click({attempt:second.id,openTab:'source'});
+  const two=h.node('#attempt-records').innerHTML;
+  assert.equal((two.match(/class="attempt-record expanded"/g)||[]).length,2);
+  assert.match(attemptCardMarkup(two,first.id),/candidate\.diff/);
+  assert.match(attemptCardMarkup(two,second.id),/data-tab="source"/);
+  assert.doesNotMatch(attemptCardMarkup(two,second.id),/candidate\.diff/,'A newly opened panel starts with source even when the other panel is on Diff');
+  await h.click({tab:'source',inspectorRun:data.id,inspectorAttempt:first.id});
+  assert.equal(attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id),firstSource);
+  const preservedSecond=attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id);
+  await h.click({tab:'tests',inspectorRun:data.id,inspectorAttempt:first.id});
+  assert.match(attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id),/class="scenario-table"/);
+  assert.equal(attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id),preservedSecond);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('the second feedback attempt compares its actual code with the first attempt by default',async()=>{
+  const h=harness(),{data,first,second}=prepareParallelInspectors(h);
+  await h.click({attempt:second.id,openTab:'source'});
+  await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:second.id});
+  const card=attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id);
+  assert.match(card,/Что поменялось после попытки 1/);
+  assert.match(card,/--- previous\.py/);
+  assert.match(card,/diff-line removed">-    return allowed and approved/);
+  assert.match(card,/diff-line added">\+    return approved and allowed/);
+  assert.doesNotMatch(card,/diff-line removed">-    return role ==/);
+  assert.match(card,/data-diff-run="run-one" data-diff-attempt="parallel-2"/);
+  assert.match(card,/<option value="previous" selected>/);
+  assert.equal(data.rows[0].source,first.source);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('changing a diff base affects only the clicked attempt and reopening remembers its last code tab',async()=>{
+  const h=harness(),fixture=parallelInspectorFixture();
+  const {data,first,second,third}=prepareParallelInspectors(h,[fixture.first,fixture.second,fixture.third]);
+  for(const row of [second,third]) {
+    await h.click({attempt:row.id,openTab:'source'});
+    await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:row.id});
+  }
+  const thirdBefore=attemptCardMarkup(h.node('#attempt-records').innerHTML,third.id);
+  await h.emit('change',{target:{dataset:{diffRun:data.id,diffAttempt:second.id},value:'original'}});
+  let markup=h.node('#attempt-records').innerHTML;
+  assert.match(attemptCardMarkup(markup,second.id),/--- original\.py/);
+  assert.match(attemptCardMarkup(markup,second.id),/diff-line removed">-    return role == &quot;owner&quot;/);
+  assert.match(attemptCardMarkup(markup,second.id),/<option value="original" selected>/);
+  assert.equal(attemptCardMarkup(markup,third.id),thirdBefore);
+  await h.click({attempt:second.id,openTab:'source'});
+  assert.doesNotMatch(attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id),/candidate\.diff/);
+  assert.match(attemptCardMarkup(h.node('#attempt-records').innerHTML,third.id),/candidate\.diff/);
+  await h.click({attempt:second.id,openTab:'source'});
+  markup=h.node('#attempt-records').innerHTML;
+  assert.match(attemptCardMarkup(markup,second.id),/candidate\.diff/);
+  assert.match(attemptCardMarkup(markup,second.id),/<option value="original" selected>/);
+  assert.equal(attemptCardMarkup(markup,third.id),thirdBefore);
+  await h.emit('change',{target:{dataset:{diffRun:data.id,diffAttempt:second.id},value:'previous'}});
+  assert.match(attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id),/--- previous\.py/);
+  assert.equal(first.source,fixture.first.source);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('polling appends another candidate while preserving both open inspectors and their different views',async()=>{
+  const fixture=parallelInspectorFixture();let next;
+  const h=harness({respond:url=>{
+    if(url==='/api/state')return {runs:[],cases:detail.cases,active:{id:next.id,running:false}};
+    assert.equal(url,'/api/runs/'+next.id);return next;
+  }});
+  const {data,first,second}=prepareParallelInspectors(h);
+  await h.click({attempt:first.id,openTab:'source'});
+  await h.click({attempt:second.id,openTab:'source'});
+  await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:second.id});
+  await h.emit('change',{target:{dataset:{diffRun:data.id,diffAttempt:second.id},value:'original'}});
+  const firstBefore=attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id);
+  const secondBefore=attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id);
+  next={...data,rows:[...data.rows,fixture.third]};
+  await h.run('pollOnce()');
+  const markup=h.node('#attempt-records').innerHTML;
+  assert.equal(attemptCardMarkup(markup,first.id),firstBefore);
+  assert.equal(attemptCardMarkup(markup,second.id),secondBefore);
+  assert.doesNotMatch(attemptCardMarkup(markup,fixture.third.id),/attempt-record expanded|THIRD_PANEL_REASON/);
+  assert.deepEqual(h.requests,['/api/state','/api/runs/'+data.id]);
+});
+
+test('attempt search and sorting retain every previously opened panel when it returns to the list',async()=>{
+  const h=harness(),{data,first,second}=prepareParallelInspectors(h);
+  await h.click({attempt:first.id,openTab:'source'});
+  await h.click({attempt:second.id,openTab:'source'});
+  await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:second.id});
+  const firstBefore=attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id);
+  const secondBefore=attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id);
+  await h.emit('input',{target:{id:'attempt-search',value:first.id}});
+  assert.doesNotMatch(h.node('#attempt-records').innerHTML,/data-record-id="parallel-2"/);
+  assert.equal(attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id),firstBefore);
+  await h.emit('input',{target:{id:'attempt-search',value:''}});
+  await h.emit('change',{target:{id:'attempt-sort',value:'newest'}});
+  const markup=h.node('#attempt-records').innerHTML;
+  assert.ok(markup.indexOf('data-record-id="parallel-2"')<markup.indexOf('data-record-id="parallel-1"'));
+  assert.equal(attemptCardMarkup(markup,first.id),firstBefore);
+  assert.equal(attemptCardMarkup(markup,second.id),secondBefore);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('panel state is isolated by run id and an explicit browser reset closes all attempt panels',async()=>{
+  const h=harness(),{data,first,second}=prepareParallelInspectors(h);
+  await h.click({attempt:first.id,openTab:'source'});
+  await h.click({attempt:second.id,openTab:'source'});
+  await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:second.id});
+  const other={...data,id:'different-run',rows:data.rows.map(row=>({...row,source:'OTHER_RUN_SOURCE'}))};
+  h.run('state.details.set(other.id,other);state.run=other.id;renderRuns()',{other});
+  let markup=h.run('attemptRecords(state.details.get(state.run))');
+  assert.doesNotMatch(markup,/attempt-record expanded|OTHER_RUN_SOURCE|candidate\.diff/);
+  h.run('state.run=data.id;renderRuns()',{data});
+  markup=h.run('attemptRecords(data)');
+  assert.equal((markup.match(/class="attempt-record expanded"/g)||[]).length,2);
+  assert.match(attemptCardMarkup(markup,second.id),/candidate\.diff/);
+  h.run('resetAttemptBrowser();renderRuns()');
+  assert.doesNotMatch(h.run('attemptRecords(data)'),/attempt-record expanded|candidate\.diff/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('source links open the exact escaped run and attempt in another browser tab without downloading',()=>{
+  const h=harness(),unsafeRun='run " onload=<script>/é',unsafeAttempt='attempt " onclick=bad()';
+  const record={...detail,id:unsafeRun,rows:[attempt({id:unsafeAttempt}),attempt({id:'missing-source',source:undefined})]};
+  const html=h.run('attemptRecords(record)',{record});
+  const links=[...html.matchAll(/<a\b[^>]*class="text-button attempt-source-link"[^>]*>/g)].map(match=>match[0]);
+  assert.equal(links.length,1);
+  assert.ok(links[0].includes(`href="/api/runs/${encodeURIComponent(unsafeRun)}/attempts/${encodeURIComponent(unsafeAttempt)}/source"`));
+  assert.match(links[0],/target="_blank" rel="noopener noreferrer"/);
+  assert.doesNotMatch(links[0],/\bdownload(?:\s|=)|<script>|href="[^"]*" onload|href="[^"]*" onclick/);
+  assert.deepEqual(h.requests,[]);
+});
+
+test('stale scoped tab and diff controls cannot modify another run or an unknown attempt',async()=>{
+  const h=harness(),{data,first,second}=prepareParallelInspectors(h);
+  await h.click({attempt:first.id,openTab:'source'});
+  await h.click({attempt:second.id,openTab:'source'});
+  const before=h.node('#attempt-records').innerHTML;
+  for(const extra of [{inspectorRun:'other-run',inspectorAttempt:first.id},{inspectorRun:data.id,inspectorAttempt:'missing-attempt'}]) {
+    await h.click({tab:'diff',...extra});
+    assert.equal(h.node('#attempt-records').innerHTML,before);
+  }
+  for(const [diffRun,diffAttempt,value] of [['other-run',first.id,'original'],[data.id,'missing-attempt','previous'],[data.id,second.id,'unsupported']]) {
+    await h.emit('change',{target:{dataset:{diffRun,diffAttempt},value}});
+    assert.equal(h.node('#attempt-records').innerHTML,before);
+  }
+  assert.deepEqual(h.requests,[]);
+});
+
+test('a feedback diff never borrows a previous candidate from another repeat or an independent mode',async()=>{
+  for(const change of [{repeat:2},{mode:'independent'}]) {
+    const h=harness(),fixture=parallelInspectorFixture();
+    const second={...fixture.second,...change};
+    const {data}=prepareParallelInspectors(h,[fixture.first,second]);
+    await h.click({attempt:second.id,openTab:'source'});
+    await h.click({tab:'diff',inspectorRun:data.id,inspectorAttempt:second.id});
+    const card=attemptCardMarkup(h.node('#attempt-records').innerHTML,second.id);
+    assert.match(card,/Сравнение с исходной правильной версией/);
+    assert.match(card,/--- original\.py/);
+    assert.doesNotMatch(card,/data-diff-attempt=|--- previous\.py|Что поменялось после попытки/);
+    assert.deepEqual(h.requests,[]);
+  }
+});
+
+test('replaying an earlier open test panel uses that exact attempt after another panel has focus',async()=>{
+  const posts=[];
+  const h=harness({allowPost:true,respond:(url,options)=>{
+    assert.equal(url,'/api/replay');assert.equal(options.method,'POST');posts.push(JSON.parse(options.body));
+    return {target_regression:true,correct:false,rows:[]};
+  }});
+  const {data,first,second}=prepareParallelInspectors(h);h.run('toast=()=>{}');
+  await h.click({attempt:first.id,openTab:'tests'});
+  await h.click({attempt:second.id,openTab:'tests'});
+  assert.equal(h.run('state.attempt'),second.id);
+  const firstPanel=attemptCardMarkup(h.node('#attempt-records').innerHTML,first.id);
+  const replay=firstPanel.match(/<button\b[^>]*data-action="replay"[^>]*>/)?.[0];
+  assert.ok(replay,'The earlier panel must have its own replay button');
+  const dataset=Object.fromEntries([...replay.matchAll(/data-([\w-]+)="([^"]*)"/g)].map(([,key,value])=>[key.replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase()),value]));
+  assert.equal(dataset.replayRun,data.id);assert.equal(dataset.replayAttempt,first.id);
+  await h.click(dataset);
+  assert.deepEqual(posts,[{run:data.id,attempt:first.id}]);
+  assert.equal(h.run('state.attempt'),second.id,'Local replay must not replace the other selected panel');
+  assert.deepEqual(h.requests,['/api/replay']);
+});
+
+test('stale replay buttons cannot target another run, an unknown attempt, or a closed inspector',async()=>{
+  const h=harness({allowPost:true,respond:()=>{throw new Error('A stale replay must not request anything');}});
+  const {data,first}=prepareParallelInspectors(h);h.run('toast=()=>{}');
+  for(const dataset of [
+    {action:'replay',replayRun:'other-run',replayAttempt:first.id},
+    {action:'replay',replayRun:data.id,replayAttempt:'missing-attempt'},
+    {action:'replay'},
+  ])await h.click(dataset);
+  h.run('state.runOpen=false');
+  await h.click({action:'replay',replayRun:data.id,replayAttempt:first.id});
+  h.run('state.runOpen=true;state.view="tasks"');
+  await h.click({action:'replay',replayRun:data.id,replayAttempt:first.id});
+  assert.deepEqual(h.requests,[]);
+});
+
+test('the legacy demo replay still uses its selected demo attempt without run-inspector attributes',async()=>{
+  let submitted;
+  const h=harness({allowPost:true,respond:(url,options)=>{
+    assert.equal(url,'/api/replay');submitted=JSON.parse(options.body);
+    return {target_regression:false,correct:true,rows:[]};
+  }});
+  const data=prepareDemo(h,attempt({id:'selected-demo-attempt'}));
+  h.run('state.view="demo";state.run="unrelated-run";state.attempt="unrelated-attempt";toast=()=>{}');
+  await h.click({action:'replay'});
+  assert.deepEqual(submitted,{run:data.id,attempt:'selected-demo-attempt'});
+  assert.deepEqual(h.requests,['/api/replay']);
 });

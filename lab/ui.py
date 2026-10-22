@@ -1,5 +1,6 @@
 """Local dashboard: read saved evidence and supervise bounded CLI campaigns."""
 import errno
+import hashlib
 import json
 import ipaddress
 import re
@@ -408,6 +409,40 @@ class Dashboard:
                 "events": read_text(path / "events.jsonl"),
                 "stderr": read_text(path / "stderr.txt")}
 
+    def attempt_source(self, run_id, attempt_id):
+        """Read one exact saved candidate as text, without executing it."""
+        if not isinstance(attempt_id, str) or not NAME.fullmatch(attempt_id):
+            raise ValueError("Invalid attempt identifier")
+        root = self.run_path(run_id)
+        folder = inside(root, "attempts", attempt_id)
+        if any(path.is_symlink() for path in
+               (self.runs / run_id, root / "attempts", root / "attempts" / attempt_id)):
+            raise ValueError("Saved source must belong to the selected attempt")
+        metadata = folder / "result.json"
+        if not metadata.exists():
+            metadata = folder / "started.json"
+        if metadata.is_symlink() or not metadata.is_file():
+            raise ValueError("Saved attempt metadata is unavailable")
+        row = read_json(inside(folder, metadata.name))
+        if not isinstance(row, dict) or row.get("id") != attempt_id:
+            raise FileNotFoundError("Saved attempt is unavailable")
+        candidate = folder / "candidate.py"
+        if candidate.is_symlink():
+            raise ValueError("Saved source must belong to the selected attempt")
+        if not candidate.is_file():
+            raise FileNotFoundError("Saved source is unavailable")
+        with inside(folder, "candidate.py").open("rb") as file:
+            source = file.read(20_001)
+        if len(source) > 20_000:
+            raise ValueError("Saved source is too large")
+        try:
+            source.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Saved source is not UTF-8 text") from exc
+        if "source_sha256" in row and hashlib.sha256(source).hexdigest() != row["source_sha256"]:
+            raise ValueError("Saved source does not match the selected attempt")
+        return source
+
     def active(self):
         with self.lock:
             if self.process:
@@ -613,6 +648,10 @@ def make_server(root, port=8765, dashboard=None, *, bind="127.0.0.1", read_only=
                         parts[3] == "attempts" and parts[5] == "evidence"):
                     filename, archive = build_evidence(app.run_path(parts[2]), parts[4])
                     return self.send(200, archive, "application/zip", filename=filename)
+                if (len(parts) == 6 and parts[:2] == ["api", "runs"] and
+                        parts[3] == "attempts" and parts[5] == "source"):
+                    return self.send(200, app.attempt_source(parts[2], parts[4]),
+                                     "text/plain; charset=utf-8")
                 return self.send(404, {"error": "Not found"})
             except (ValueError, FileNotFoundError) as exc:
                 self.send(404, {"error": str(exc)})
